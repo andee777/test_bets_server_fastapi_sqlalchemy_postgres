@@ -8,8 +8,8 @@ services:
     expose:
       - "8000"
     labels:
-      - "VIRTUAL_HOST=${APP_VIRTUAL_HOST}"
-      - "LETSENCRYPT_HOST=${APP_VIRTUAL_HOST}"
+      - "VIRTUAL_HOST=test-bets.karunanidhi.dev"
+      - "LETSENCRYPT_HOST=test-bets.karunanidhi.dev"
       - "LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}"
     depends_on:
       - cloudsql-proxy
@@ -25,8 +25,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     labels:
-      - "VIRTUAL_HOST=${DOZZLE_VIRTUAL_HOST}"
-      - "LETSENCRYPT_HOST=${DOZZLE_VIRTUAL_HOST}"
+      - "VIRTUAL_HOST=dozzle.test-bets.karunanidhi.dev"
+      - "LETSENCRYPT_HOST=dozzle.test-bets.karunanidhi.dev"
       - "LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}"
     networks:
       - backend
