@@ -22,6 +22,8 @@ services:
     env_file: .env
     expose:
       - "8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     labels:
       - "VIRTUAL_HOST=${DOZZLE_VIRTUAL_HOST}"
       - "LETSENCRYPT_HOST=${DOZZLE_VIRTUAL_HOST}"
