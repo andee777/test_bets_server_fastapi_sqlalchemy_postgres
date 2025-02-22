@@ -1,78 +1,48 @@
 version: '3.8'
 
 services:
-  nginx-proxy:
-    image: jwilder/nginx-proxy:latest
-    container_name: nginx_proxy
-    restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/tmp/docker.sock:ro
-      - ./certs:/etc/nginx/certs:rw
-      - ./vhost.d:/etc/nginx/vhost.d:rw
-      - ./html:/usr/share/nginx/html:rw
-    networks:
-      - backend
-
-  letsencrypt:
-    image: jrcs/letsencrypt-nginx-proxy-companion:latest
-    container_name: nginx_letsencrypt
-    restart: always
-    environment:
-      - NGINX_PROXY_CONTAINER=nginx_proxy
-      - ACME_CA_URI=https://acme-v02.api.letsencrypt.org/directory
-      - ACME_HTTP_CHALLENGE_LOCATION=true
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./certs:/etc/nginx/certs:rw
-      - ./vhost.d:/etc/nginx/vhost.d:rw
-      - ./html:/usr/share/nginx/html:rw
-    networks:
-      - backend
-
-  cloudsql-proxy:
-    image: gcr.io/cloudsql-docker/gce-proxy:1.19.1
-    container_name: cloudsql_proxy
-    env_file: .env
-    command: /cloud_sql_proxy -instances=${CLOUD_SQL_INSTANCE}=tcp:0.0.0.0:5432 -credential_file=/secrets/service-account.json
-    volumes:
-      - ./secrets:/secrets:ro
-    expose:
-      - "5432"
-    networks:
-      - backend
-
   app:
     build: .
     container_name: fastapi_app
     env_file: .env
     ports:
       - "8000:8000"
-    labels:
-      - "VIRTUAL_HOST=${APP_VIRTUAL_HOST}"
-      - "LETSENCRYPT_HOST=${APP_VIRTUAL_HOST}"
-      - "LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}"
-      - "VIRTUAL_PORT=8000"
     depends_on:
       - cloudsql-proxy
+    networks:
+      - backend
+
+  cloudsql-proxy:
+    image: gcr.io/cloudsql-docker/gce-proxy:1.19.1
+    container_name: cloudsql_proxy
+    command: /cloud_sql_proxy -instances=${CLOUD_SQL_INSTANCE}=tcp:0.0.0.0:5432 -credential_file=/secrets/service-account.json
+    volumes:
+      - ./secrets:/secrets:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - backend
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
     networks:
       - backend
 
   dozzle:
     image: amir20/dozzle:latest
     container_name: dozzle
-    env_file: .env
     ports:
       - "8080:8080"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    labels:
-      - "VIRTUAL_HOST=${DOZZLE_VIRTUAL_HOST}"
-      - "LETSENCRYPT_HOST=${DOZZLE_VIRTUAL_HOST}"
-      - "LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}"
-      - "VIRTUAL_PORT=8080"
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
     networks:
       - backend
 
