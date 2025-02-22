@@ -1,48 +1,67 @@
-version: '3.8'
-
 services:
   app:
     build: .
     container_name: fastapi_app
     env_file: .env
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
+    labels:
+      - "VIRTUAL_HOST=${APP_VIRTUAL_HOST}"
+      - "LETSENCRYPT_HOST=${APP_VIRTUAL_HOST}"
+      - "LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}"
     depends_on:
       - cloudsql-proxy
-    networks:
-      - backend
-
-  cloudsql-proxy:
-    image: gcr.io/cloudsql-docker/gce-proxy:1.19.1
-    container_name: cloudsql_proxy
-    command: /cloud_sql_proxy -instances=${CLOUD_SQL_INSTANCE}=tcp:0.0.0.0:5432 -credential_file=/secrets/service-account.json
-    volumes:
-      - ./secrets:/secrets:ro
-    ports:
-      - "5432:5432"
-    networks:
-      - backend
-
-  nginx:
-    image: nginx:latest
-    container_name: nginx
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - app
     networks:
       - backend
 
   dozzle:
     image: amir20/dozzle:latest
     container_name: dozzle
-    ports:
-      - "8080:8080"
+    env_file: .env
+    expose:
+      - "8080"
+    labels:
+      - "VIRTUAL_HOST=${DOZZLE_VIRTUAL_HOST}"
+      - "LETSENCRYPT_HOST=${DOZZLE_VIRTUAL_HOST}"
+      - "LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}"
+    networks:
+      - backend
+
+  cloudsql-proxy:
+    image: gcr.io/cloudsql-docker/gce-proxy:1.19.1
+    container_name: cloudsql_proxy
+    env_file: .env
+    command: /cloud_sql_proxy -instances=${CLOUD_SQL_INSTANCE}=tcp:0.0.0.0:5432 -credential_file=/secrets/service-account.json
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    restart: unless-stopped
+      - ./secrets:/secrets:ro
+    expose:
+      - "5432"
+    networks:
+      - backend
+
+  nginx-proxy:
+    image: jwilder/nginx-proxy
+    container_name: nginx_proxy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - backend
+
+  letsencrypt:
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    container_name: nginx_letsencrypt
+    restart: always
+    environment:
+      - NGINX_PROXY_CONTAINER=nginx_proxy
+      - ACME_CA_URI=https://acme-v02.api.letsencrypt.org/directory
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs:/etc/nginx/certs
     networks:
       - backend
 
