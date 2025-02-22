@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: fastapi_app
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - cloudsql-proxy
+    networks:
+      - backend
+
+  cloudsql-proxy:
+    image: gcr.io/cloudsql-docker/gce-proxy:1.19.1
+    container_name: cloudsql_proxy
+    command: /cloud_sql_proxy -instances=${CLOUD_SQL_INSTANCE}=tcp:0.0.0.0:5432 -credential_file=/secrets/service-account.json
+    volumes:
+      - ./secrets:/secrets:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - backend
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+    networks:
+      - backend
+
+networks:
+  backend:
