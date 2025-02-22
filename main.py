@@ -12,12 +12,18 @@ from contextlib import asynccontextmanager
 # Load environment variables from .env file
 load_dotenv()
 
-# Retrieve database credentials from environment variables
+# Database credentials from environment variables
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT")
 DB_NAME = os.getenv("DB_NAME")
+CLOUD_SQL_INSTANCE = os.getenv("CLOUD_SQL_INSTANCE")
+
+# URLs for fetching data from environment variables
+LIVE_URL = os.getenv("LIVE_URL")
+FOOTBALL_URL = os.getenv("FOOTBALL_URL")
+BASKETBALL_URL = os.getenv("BASKETBALL_URL")
 
 # Create the database URL
 DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
@@ -71,7 +77,7 @@ class BasketballMatch(Base):
 # --------------------------
 
 async def fetch_and_store_live():
-    url = "https://live.betika.com/v1/uo/matches?page=1&limit=1000&sub_type_id=1,186,340&sport=14&sort=1"
+    url = LIVE_URL
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url)
@@ -103,7 +109,7 @@ async def fetch_and_store_live():
             print(f"Error saving live data: {e}")
 
 async def fetch_and_store_football():
-    url = "https://api.betika.com/v1/uo/matches?page=1&limit=1000&sub_type_id=1,186,340&sport=14&sort=1"
+    url = FOOTBALL_URL
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url)
@@ -138,7 +144,7 @@ async def fetch_and_store_football():
             print(f"Error saving football data: {e}")
 
 async def fetch_and_store_basketball():
-    url = "https://api.betika.com/v1/uo/matches?page=1&limit=10&tab=&sub_type_id=1,186,340&sport_id=30&sort_id=1&period_id=-1&esports=false"
+    url = BASKETBALL_URL
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url)
@@ -172,31 +178,28 @@ async def fetch_and_store_basketball():
             await session.rollback()
             print(f"Error saving basketball data: {e}")
 
-# Define a background task to periodically fetch data
-async def periodic_fetch():
-    while True:
-        await fetch_and_store_live()
-        await fetch_and_store_football()
-        await fetch_and_store_basketball()
-        await asyncio.sleep(10)
-
 # --------------------------
 # Lifespan Event Handler
 # --------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create tables and start the background task
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     background_task = asyncio.create_task(periodic_fetch())
     yield
-    # Shutdown: cancel the background task
     background_task.cancel()
     try:
         await background_task
     except asyncio.CancelledError:
         pass
+
+async def periodic_fetch():
+    while True:
+        await fetch_and_store_live()
+        await fetch_and_store_football()
+        await fetch_and_store_basketball()
+        await asyncio.sleep(10)
 
 # Create the FastAPI app with the lifespan handler
 app = FastAPI(lifespan=lifespan)
