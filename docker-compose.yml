@@ -23,8 +23,7 @@ services:
     environment:
       - NGINX_PROXY_CONTAINER=nginx_proxy
       - ACME_CA_URI=https://acme-v02.api.letsencrypt.org/directory
-      - ACME_HTTP_CHALLENGE_LOCATION=legacy
-      - HTTPS_METHOD=redirect
+      - ACME_HTTP_CHALLENGE_LOCATION=true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./certs:/etc/nginx/certs:rw
@@ -32,7 +31,6 @@ services:
       - ./html:/usr/share/nginx/html:rw
     networks:
       - backend
-
 
   cloudsql-proxy:
     image: gcr.io/cloudsql-docker/gce-proxy:1.19.1
@@ -50,8 +48,8 @@ services:
     build: .
     container_name: fastapi_app
     env_file: .env
-    expose:
-      - "8000"
+    ports:
+      - "8000:8000"
     labels:
       - "VIRTUAL_HOST=${APP_VIRTUAL_HOST}"
       - "LETSENCRYPT_HOST=${APP_VIRTUAL_HOST}"
@@ -66,8 +64,8 @@ services:
     image: amir20/dozzle:latest
     container_name: dozzle
     env_file: .env
-    expose:
-      - "8080"
+    ports:
+      - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     labels:
