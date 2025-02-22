@@ -1,33 +1,33 @@
 version: '3.8'
 
 services:
-  app:
-    build: .
-    container_name: fastapi_app
-    env_file: .env
-    expose:
-      - "8000"
-    labels:
-      - "VIRTUAL_HOST=test-bets.karunanidhi.dev"
-      - "LETSENCRYPT_HOST=test-bets.karunanidhi.dev"
-      - "LETSENCRYPT_EMAIL=andee847@gmail.com"
-    depends_on:
-      - cloudsql-proxy
+  nginx-proxy:
+    image: jwilder/nginx-proxy:latest
+    container_name: nginx_proxy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - ./certs:/etc/nginx/certs:rw
+      - ./vhost.d:/etc/nginx/vhost.d:rw
+      - ./html:/usr/share/nginx/html:rw
     networks:
       - backend
 
-  dozzle:
-    image: amir20/dozzle:latest
-    container_name: dozzle
-    env_file: .env
-    expose:
-      - "8080"
+  letsencrypt:
+    image: jrcs/letsencrypt-nginx-proxy-companion:latest
+    container_name: nginx_letsencrypt
+    restart: always
+    environment:
+      - NGINX_PROXY_CONTAINER=nginx_proxy
+      - ACME_CA_URI=https://acme-v02.api.letsencrypt.org/directory
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    labels:
-      - "VIRTUAL_HOST=dozzle.test-bets.karunanidhi.dev"
-      - "LETSENCRYPT_HOST=dozzle.test-bets.karunanidhi.dev"
-      - "LETSENCRYPT_EMAIL=andee847@gmail.com"
+      - ./certs:/etc/nginx/certs:rw
+      - ./vhost.d:/etc/nginx/vhost.d:rw
+      - ./html:/usr/share/nginx/html:rw
     networks:
       - backend
 
@@ -43,34 +43,33 @@ services:
     networks:
       - backend
 
-  nginx-proxy:
-    image: jwilder/nginx-proxy
-    container_name: nginx_proxy
-    restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/tmp/docker.sock:ro
-      - ./certs:/etc/nginx/certs:rw
-      - ./vhost.d:/etc/nginx/vhost.d:rw
-      - ./html:/usr/share/nginx/html:rw
+  app:
+    build: .
+    container_name: fastapi_app
+    env_file: .env
+    expose:
+      - "8000"
+    labels:
+      - "VIRTUAL_HOST=${APP_VIRTUAL_HOST}"
+      - "LETSENCRYPT_HOST=${APP_VIRTUAL_HOST}"
+      - "LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}"
+      - "VIRTUAL_PORT=8000"
+    depends_on:
+      - cloudsql-proxy
     networks:
       - backend
 
-  letsencrypt:
-    image: jrcs/letsencrypt-nginx-proxy-companion
-    container_name: nginx_letsencrypt
-    restart: always
-    environment:
-      - NGINX_PROXY_CONTAINER=nginx_proxy
-      - ACME_CA_URI=https://acme-v02.api.letsencrypt.org/directory
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./certs:/etc/nginx/certs:rw
-      - ./vhost.d:/etc/nginx/vhost.d:rw
-      - ./html:/usr/share/nginx/html:rw
-      - ./acme.sh:/etc/acme.sh:rw
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    env_file: .env
+    expose:
+      - "8080"
+    labels:
+      - "VIRTUAL_HOST=${DOZZLE_VIRTUAL_HOST}"
+      - "LETSENCRYPT_HOST=${DOZZLE_VIRTUAL_HOST}"
+      - "LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}"
+      - "VIRTUAL_PORT=8080"
     networks:
       - backend
 
