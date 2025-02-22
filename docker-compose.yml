@@ -58,20 +58,21 @@ services:
     networks:
       - backend
 
-  letsencrypt:
-    image: jrcs/letsencrypt-nginx-proxy-companion
-    container_name: nginx_letsencrypt
-    restart: always
-    environment:
-      - NGINX_PROXY_CONTAINER=nginx_proxy
-      - ACME_CA_URI=https://acme-v02.api.letsencrypt.org/directory
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./certs:/etc/nginx/certs:rw
-      - ./vhost.d:/etc/nginx/vhost.d:rw
-      - ./html:/usr/share/nginx/html:rw
-    networks:
-      - backend
+letsencrypt:
+  image: jrcs/letsencrypt-nginx-proxy-companion
+  container_name: nginx_letsencrypt
+  restart: always
+  environment:
+    - NGINX_PROXY_CONTAINER=nginx_proxy
+    - ACME_CA_URI=https://acme-v02.api.letsencrypt.org/directory
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+    - ./certs:/etc/nginx/certs:rw
+    - ./vhost.d:/etc/nginx/vhost.d:rw
+    - ./html:/usr/share/nginx/html:rw
+    - ./acme.sh:/etc/acme.sh:rw
+  networks:
+    - backend
 
 networks:
   backend:
