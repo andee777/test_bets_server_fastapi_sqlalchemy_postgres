@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   app:
     build: .
@@ -48,7 +50,8 @@ services:
       - "443:443"
     volumes:
       - /var/run/docker.sock:/tmp/docker.sock:ro
-      - ./certs:/etc/nginx/certs:ro
+      - ./certs:/etc/nginx/certs
+      - ./nginx_html:/usr/share/nginx/html
     networks:
       - backend
 
@@ -62,6 +65,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./certs:/etc/nginx/certs
+      - ./le_data:/app/letsencrypt_service_data
     networks:
       - backend
 
