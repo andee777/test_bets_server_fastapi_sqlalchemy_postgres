@@ -27,9 +27,7 @@ services:
 
   # Nginx Service (for reverse proxy)
   nginx:
-    build:
-      context: .
-      dockerfile: nginx/Dockerfile
+    image: nginx:latest
     ports:
       - "80:80"  # HTTP
       - "443:443"  # HTTPS
@@ -47,9 +45,7 @@ services:
 
   # Certbot Service (for SSL certificates)
   certbot:
-    build:
-      context: ./certbot
-      dockerfile: Dockerfile
+    image: certbot/certbot
     volumes:
       - ./certbot/conf:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
