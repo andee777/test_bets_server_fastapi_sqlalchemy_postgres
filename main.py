@@ -38,7 +38,7 @@ Base = declarative_base()
 # --------------------------
 
 class LiveMatch(Base):
-    __tablename__ = 'live_matches'
+    __tablename__ = 'LiveMatch'
     id = Column(Integer, primary_key=True, index=True)
     competition_name = Column(Text)
     category = Column(Text)
@@ -51,7 +51,7 @@ class LiveMatch(Base):
     fetched_at = Column(DateTime, default=datetime.utcnow)
 
 class FootballMatch(Base):
-    __tablename__ = 'football_matches'
+    __tablename__ = 'FootballMatch'
     id = Column(Integer, primary_key=True, index=True)
     start_time = Column(DateTime, nullable=True)
     competition_name = Column(Text)
@@ -62,7 +62,7 @@ class FootballMatch(Base):
     fetched_at = Column(DateTime, default=datetime.utcnow)
 
 class BasketballMatch(Base):
-    __tablename__ = 'basketball_matches'
+    __tablename__ = 'BasketballMatch'
     id = Column(Integer, primary_key=True, index=True)
     start_time = Column(DateTime, nullable=True)
     competition_name = Column(Text)
