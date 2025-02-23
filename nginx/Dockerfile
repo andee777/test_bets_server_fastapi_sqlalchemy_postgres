@@ -1,9 +1,9 @@
 FROM nginx:latest
 
 # Copy custom Nginx configuration files into the image
-COPY ./conf.d/default.conf /etc/nginx/conf.d/default.conf
+COPY ./nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf
 # COPY ./conf.d/ssl.conf /etc/nginx/conf.d/ssl.conf
-COPY ./nginx.conf /etc/nginx/nginx.conf
+COPY ./nginx/nginx.conf /etc/nginx/nginx.conf
 
 # Create a directory for the Certbot challenge
 RUN mkdir -p /var/www/certbot
