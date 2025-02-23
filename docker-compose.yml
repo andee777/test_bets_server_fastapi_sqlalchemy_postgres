@@ -3,7 +3,7 @@ services:
   # Google Postgres
   cloudsql-proxy:
     image: gcr.io/cloudsql-docker/gce-proxy:1.19.1
-    container_name: cloudsql_proxy
+    container_name: google_cloud_sql_proxy
     command: /cloud_sql_proxy -instances=${CLOUD_SQL_INSTANCE}=tcp:0.0.0.0:5432 -credential_file=/secrets/service-account.json
     volumes:
       - ./secrets:/secrets:ro
@@ -27,6 +27,7 @@ services:
 
   # Nginx Service (for reverse proxy)
   nginx:
+    container_name: nginx
     image: nginx:latest
     ports:
       - "80:80"  # HTTP
@@ -45,6 +46,7 @@ services:
 
   # Certbot Service (for SSL certificates)
   certbot:
+    container_name: certbot
     image: certbot/certbot
     volumes:
       - ./certbot/conf:/etc/letsencrypt
@@ -58,6 +60,7 @@ services:
 
   # Dozzle Service
   dozzle:
+    container_name: dozzle
     image: amir20/dozzle:latest
     ports:
       - "8080:8080"  # Map Dozzle's port to the host
