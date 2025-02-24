@@ -87,7 +87,7 @@ async def fetch_and_store_live():
     except Exception as e:
         print(f"Error fetching live data: {e}")
         return
-
+    print(f'- fetch_and_store_live: Added {len(matches)} matches.')
     async with async_session() as session:
         for match in matches:
             live_match = LiveMatch(
