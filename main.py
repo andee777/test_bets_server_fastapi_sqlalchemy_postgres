@@ -58,6 +58,7 @@ class Odds(Base):
     fetched_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 async def fetch_and_store_data(url: str, category: str):
+    print(f'- fetch_and_store_data: category: {category}')
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url)
@@ -82,6 +83,7 @@ async def fetch_and_store_data(url: str, category: str):
                     if match.get("start_time") else None,
             }
             match_data_list.append(match_data)
+        print(f'- fetch_and_store_data: category: len matches: {len(matches)}, len match_data_list: {len(match_data_list)}')
 
         # Upsert matches into the Match table
         stmt = insert(Match)
