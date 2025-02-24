@@ -42,7 +42,7 @@ Base = declarative_base()
 
 # Define the Models
 class Match(Base):
-    __tablename__ = 'matches'
+    __tablename__ = 'Match'
     match_id = Column(BigInteger, primary_key=True, index=True)
     competition_name = Column(Text, index=True)
     category = Column(Text)
@@ -51,7 +51,7 @@ class Match(Base):
     start_time = Column(DateTime)
 
 class Odds(Base):
-    __tablename__ = 'odds'
+    __tablename__ = 'Odds'
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     match_id = Column(BigInteger, ForeignKey('matches.match_id'), index=True)
     event_status = Column(Text)
