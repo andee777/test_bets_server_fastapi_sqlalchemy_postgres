@@ -151,11 +151,13 @@ async def fetch_and_store_data(url: str, category: str):
             print(f"Error saving {category} data: {e}")
 
 async def periodic_fetch_live():
+    logger.info("--------- periodic_fetch_live ---------")
     while True:
         await fetch_and_store_data(LIVE_URL, "live")
         await asyncio.sleep(10)  # 10 seconds
 
 async def periodic_fetch_others():
+    logger.info("--------- periodic_fetch_others ---------")
     while True:
         await fetch_and_store_data(FOOTBALL_URL, "football")
         await fetch_and_store_data(BASKETBALL_URL, "basketball")
