@@ -155,9 +155,10 @@ async def periodic_fetch_live():
         await asyncio.sleep(10)  # 10 seconds
 
 async def periodic_fetch_others():
-    logger.info("--------- periodic_fetch_others ---------")
     while True:
+        logger.info("--------- periodic_fetch_football ---------")
         await fetch_and_store_data(FOOTBALL_URL, "football")
+        logger.info("--------- periodic_fetch_basketball ---------")
         await fetch_and_store_data(BASKETBALL_URL, "basketball")
         await asyncio.sleep(20)  # 5 minutes
 
