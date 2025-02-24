@@ -53,7 +53,7 @@ class Match(Base):
 class Odds(Base):
     __tablename__ = 'Odds'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    match_id = Column(Integer, ForeignKey('matches.match_id'), index=True)
+    match_id = Column(Integer, ForeignKey('Match.match_id'), index=True)
     event_status = Column(Text)
     match_time = Column(Text)
     current_score = Column(Text)
