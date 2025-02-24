@@ -97,6 +97,8 @@ async def fetch_and_store_data(url: str, category: str):
         }
         batch_size = 20
         for i in range(0, len(match_data_list), batch_size):
+            logger.info(f'- fetch_and_store_data__{category}: processing batch {i}')
+
             batch = match_data_list[i:i + batch_size]
             stmt = insert(Match).values(batch).on_conflict_do_update(
                 index_elements=['match_id'],
