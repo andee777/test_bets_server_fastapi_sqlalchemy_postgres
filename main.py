@@ -35,7 +35,7 @@ BASKETBALL_URL = os.getenv("BASKETBALL_URL")
 DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # Create SQLAlchemy async engine and session maker
-engine = create_async_engine(DATABASE_URL, echo=False)
+engine = create_async_engine(DATABASE_URL, echo=True)
 async_session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 Base = declarative_base()
 
