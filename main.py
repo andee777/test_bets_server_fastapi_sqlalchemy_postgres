@@ -95,7 +95,7 @@ async def fetch_and_store_data(url: str, category: str):
             col.name: getattr(stmt.excluded, col.name)
             for col in Match.__table__.columns if col.name != 'match_id'
         }
-        stmt = stmt.values(match_data_list[:20]).on_conflict_do_update(
+        stmt = stmt.values(match_data_list).on_conflict_do_update(
             index_elements=['match_id'],
             set_=set_dict
         )
@@ -168,15 +168,15 @@ async def periodic_fetch_others():
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    background_task_live = asyncio.create_task(periodic_fetch_live())
+    # background_task_live = asyncio.create_task(periodic_fetch_live())
     background_task_others = asyncio.create_task(periodic_fetch_others())
     yield
-    background_task_live.cancel()
+    # background_task_live.cancel()
     background_task_others.cancel()
-    try:
-        await background_task_live
-    except asyncio.CancelledError:
-        pass
+    # try:
+    #     await background_task_live
+    # except asyncio.CancelledError:
+    #     pass
     try:
         await background_task_others
     except asyncio.CancelledError:
