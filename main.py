@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, Text, DateTime, String, BigInteger, ForeignKey
+from sqlalchemy import Column, Text, DateTime, String, Integer, ForeignKey
 from sqlalchemy.dialects.postgresql import insert
 
 import httpx
@@ -43,7 +43,7 @@ Base = declarative_base()
 # Define the Models
 class Match(Base):
     __tablename__ = 'Match'
-    match_id = Column(int, primary_key=True, index=True)
+    match_id = Column(Integer, primary_key=True, index=True)
     competition_name = Column(Text, index=True)
     category = Column(Text)
     home_team = Column(Text)
@@ -52,8 +52,8 @@ class Match(Base):
 
 class Odds(Base):
     __tablename__ = 'Odds'
-    id = Column(int, primary_key=True, autoincrement=True)
-    match_id = Column(int, ForeignKey('matches.match_id'), index=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    match_id = Column(Integer, ForeignKey('matches.match_id'), index=True)
     event_status = Column(Text)
     match_time = Column(Text)
     current_score = Column(Text)
