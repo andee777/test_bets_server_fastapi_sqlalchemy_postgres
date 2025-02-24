@@ -35,7 +35,7 @@ BASKETBALL_URL = os.getenv("BASKETBALL_URL")
 DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # Create SQLAlchemy async engine and session maker
-engine = create_async_engine(DATABASE_URL, echo=True)
+engine = create_async_engine(DATABASE_URL, echo=False)
 async_session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 Base = declarative_base()
 
@@ -78,7 +78,7 @@ async def fetch_and_store_data(url: str, category: str):
         match_data_list = []
         for match in matches:
             match_data = {
-                "match_id": match.get("match_id"),
+                "match_id": int(match.get("match_id")),
                 "competition_name": match.get("competition_name"),
                 "category": category,
                 "home_team": match.get("home_team"),
@@ -95,60 +95,53 @@ async def fetch_and_store_data(url: str, category: str):
             col.name: getattr(stmt.excluded, col.name)
             for col in Match.__table__.columns if col.name != 'match_id'
         }
-        batch_size = 5
-        for i in range(0, len(match_data_list), batch_size):
-            logger.info(f'- fetch_and_store_data__{category}: processing batch {i}')
-
-            batch = match_data_list[i:i + batch_size]
-            stmt = insert(Match).values(batch).on_conflict_do_update(
-                index_elements=['match_id'],
-                set_=set_dict
-            )
-            logger.info("Starting upsert operation...")
-            await session.execute(stmt)
-            logger.info("Upsert operation completed.")
+        stmt = stmt.values(match_data_list[:20]).on_conflict_do_update(
+            index_elements=['match_id'],
+            set_=set_dict
+        )
+        await session.execute(stmt)
 
         # Prepare odds data for bulk insert
-        # odds_data_list = []
-        # for match in matches:
-        #     # Initialize odds values
-        #     home_win = None
-        #     draw = None
-        #     away_win = None
+        odds_data_list = []
+        for match in matches:
+            # Initialize odds values
+            home_win = None
+            draw = None
+            away_win = None
 
-        #     # For pre game matches (football and basketball) use direct fields
-        #     if category in ("football", "basketball"):
-        #         home_win = match.get("home_odd")
-        #         draw = match.get("neutral_odd")
-        #         away_win = match.get("away_odd")
-        #     else:
-        #         # For live matches, process the odds array to find 1X2 odds if available
-        #         odds_array = match.get("odds", [])
-        #         for group in odds_array:
-        #             if group.get("name") == "1X2":
-        #                 for odd in group.get("odds", []):
-        #                     display = odd.get("display")
-        #                     if display == "1":
-        #                         home_win = odd.get("odd_value")
-        #                     elif display.upper() == "X":
-        #                         draw = odd.get("odd_value")
-        #                     elif display == "2":
-        #                         away_win = odd.get("odd_value")
+            # For pre game matches (football and basketball) use direct fields
+            if category in ("football", "basketball"):
+                home_win = match.get("home_odd")
+                draw = match.get("neutral_odd")
+                away_win = match.get("away_odd")
+            else:
+                # For live matches, process the odds array to find 1X2 odds if available
+                odds_array = match.get("odds", [])
+                for group in odds_array:
+                    if group.get("name") == "1X2":
+                        for odd in group.get("odds", []):
+                            display = odd.get("display")
+                            if display == "1":
+                                home_win = odd.get("odd_value")
+                            elif display.upper() == "X":
+                                draw = odd.get("odd_value")
+                            elif display == "2":
+                                away_win = odd.get("odd_value")
 
-        #     odds_data = {
-        #         "match_id": match.get("match_id"),
-        #         "event_status": match.get("event_status"),
-        #         "match_time": match.get("match_time"),
-        #         "current_score": match.get("current_score"),
-        #         "home_win": home_win,
-        #         "draw": draw,
-        #         "away_win": away_win,
-        #         "fetched_at": datetime.utcnow(),
-        #     }
-        #     odds_data_list.append(odds_data)
+            odds_data = {
+                "match_id": match.get("match_id"),
+                "event_status": match.get("event_status"),
+                "match_time": match.get("match_time"),
+                "current_score": match.get("current_score"),
+                "home_win": home_win,
+                "draw": draw,
+                "away_win": away_win,
+                "fetched_at": datetime.utcnow(),
+            }
+            odds_data_list.append(odds_data)
 
-        # # Insert odds data into the Odds table
-        # await session.execute(insert(Odds).values(odds_data_list))
+        # Insert odds data into the Odds table
+        await session.execute(insert(Odds).values(odds_data_list))
 
         try:
             await session.commit()
@@ -166,24 +159,22 @@ async def periodic_fetch_others():
     logger.info("--------- periodic_fetch_others ---------")
     while True:
         await fetch_and_store_data(FOOTBALL_URL, "football")
-        logger.info("--------- periodic_fetch_others__football___OK ---------")
         await fetch_and_store_data(BASKETBALL_URL, "basketball")
-        logger.info("--------- periodic_fetch_others__basketball___OK ---------")
         await asyncio.sleep(20)  # 5 minutes
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    # background_task_live = asyncio.create_task(periodic_fetch_live())
+    background_task_live = asyncio.create_task(periodic_fetch_live())
     background_task_others = asyncio.create_task(periodic_fetch_others())
     yield
-    # background_task_live.cancel()
+    background_task_live.cancel()
     background_task_others.cancel()
-    # try:
-    #     await background_task_live
-    # except asyncio.CancelledError:
-    #     pass
+    try:
+        await background_task_live
+    except asyncio.CancelledError:
+        pass
     try:
         await background_task_others
     except asyncio.CancelledError:
