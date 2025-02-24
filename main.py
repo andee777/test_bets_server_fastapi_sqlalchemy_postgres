@@ -95,7 +95,7 @@ async def fetch_and_store_data(url: str, category: str):
             col.name: getattr(stmt.excluded, col.name)
             for col in Match.__table__.columns if col.name != 'match_id'
         }
-        batch_size = 20
+        batch_size = 5
         for i in range(0, len(match_data_list), batch_size):
             logger.info(f'- fetch_and_store_data__{category}: processing batch {i}')
 
@@ -107,7 +107,7 @@ async def fetch_and_store_data(url: str, category: str):
             logger.info("Starting upsert operation...")
             await session.execute(stmt)
             logger.info("Upsert operation completed.")
-            
+
         # Prepare odds data for bulk insert
         odds_data_list = []
         for match in matches:
