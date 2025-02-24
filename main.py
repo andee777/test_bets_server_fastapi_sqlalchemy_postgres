@@ -104,8 +104,10 @@ async def fetch_and_store_data(url: str, category: str):
                 index_elements=['match_id'],
                 set_=set_dict
             )
+            logger.info("Starting upsert operation...")
             await session.execute(stmt)
-
+            logger.info("Upsert operation completed.")
+            
         # Prepare odds data for bulk insert
         odds_data_list = []
         for match in matches:
