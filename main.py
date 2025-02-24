@@ -11,6 +11,11 @@ import asyncio
 from datetime import datetime
 from contextlib import asynccontextmanager
 
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -66,7 +71,7 @@ async def fetch_and_store_data(url: str, category: str):
             data = response.json()
             matches = data.get("data", [])
     except Exception as e:
-        print(f"Error fetching {category} data: {e}")
+        logger.info(f"Error fetching {category} data: {e}")
         return
 
     async with async_session() as session:
@@ -83,7 +88,7 @@ async def fetch_and_store_data(url: str, category: str):
                     if match.get("start_time") else None,
             }
             match_data_list.append(match_data)
-        print(f'- fetch_and_store_data: category: len matches: {len(matches)}, len match_data_list: {len(match_data_list)}')
+        logger.info(f'- fetch_and_store_data: category: len matches: {len(matches)}, len match_data_list: {len(match_data_list)}')
 
         # Upsert matches into the Match table
         stmt = insert(Match)
