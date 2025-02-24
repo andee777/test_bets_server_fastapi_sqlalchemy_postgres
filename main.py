@@ -160,7 +160,7 @@ async def periodic_fetch_others():
     while True:
         await fetch_and_store_data(FOOTBALL_URL, "football")
         await fetch_and_store_data(BASKETBALL_URL, "basketball")
-        await asyncio.sleep(20)
+        await asyncio.sleep(300)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
