@@ -3,7 +3,9 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, Integer, Text, JSON, DateTime
+from sqlalchemy import Column, Integer, Text, JSON, DateTime, String, BigInteger, ForeignKey
+from sqlalchemy.dialects.postgresql import insert, excluded
+
 import httpx
 import asyncio
 from datetime import datetime
@@ -18,7 +20,6 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT")
 DB_NAME = os.getenv("DB_NAME")
-CLOUD_SQL_INSTANCE = os.getenv("CLOUD_SQL_INSTANCE")
 
 # URLs for fetching data from environment variables
 LIVE_URL = os.getenv("LIVE_URL")
@@ -33,51 +34,27 @@ engine = create_async_engine(DATABASE_URL, echo=False)
 async_session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 Base = declarative_base()
 
-# --------------------------
 # Define the Models
-# --------------------------
-
-class LiveMatch(Base):
-    __tablename__ = 'LiveMatch'
-    id = Column(Integer, primary_key=True, index=True)
-    competition_name = Column(Text)
+class Match(Base):
+    __tablename__ = 'matches'
+    match_id = Column(BigInteger, primary_key=True, index=True)
+    competition_name = Column(Text, index=True)
     category = Column(Text)
     home_team = Column(Text)
     away_team = Column(Text)
+    start_time = Column(DateTime)
+
+class Odds(Base):
+    __tablename__ = 'odds'
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    match_id = Column(BigInteger, ForeignKey('matches.match_id'), index=True)
     event_status = Column(Text)
     match_time = Column(Text)
     current_score = Column(Text)
     odds = Column(JSON)
-    fetched_at = Column(DateTime, default=datetime.utcnow)
+    fetched_at = Column(DateTime, default=datetime.utcnow, index=True)
 
-class FootballMatch(Base):
-    __tablename__ = 'FootballMatch'
-    id = Column(Integer, primary_key=True, index=True)
-    start_time = Column(DateTime, nullable=True)
-    competition_name = Column(Text)
-    category = Column(Text)
-    home_team = Column(Text)
-    away_team = Column(Text)
-    odds = Column(JSON)
-    fetched_at = Column(DateTime, default=datetime.utcnow)
-
-class BasketballMatch(Base):
-    __tablename__ = 'BasketballMatch'
-    id = Column(Integer, primary_key=True, index=True)
-    start_time = Column(DateTime, nullable=True)
-    competition_name = Column(Text)
-    category = Column(Text)
-    home_team = Column(Text)
-    away_team = Column(Text)
-    odds = Column(JSON)
-    fetched_at = Column(DateTime, default=datetime.utcnow)
-
-# --------------------------
-# Fetch and Store Functions
-# --------------------------
-
-async def fetch_and_store_live():
-    url = LIVE_URL
+async def fetch_and_store_data(url: str, category: str):
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url)
@@ -85,140 +62,97 @@ async def fetch_and_store_live():
             data = response.json()
             matches = data.get("data", [])
     except Exception as e:
-        print(f"Error fetching live data: {e}")
+        print(f"Error fetching {category} data: {e}")
         return
-    print(f'- fetch_and_store_live: Added {len(matches)} matches.')
+
     async with async_session() as session:
+        # Handle match insertions/updates
+        match_data_list = []
         for match in matches:
-            live_match = LiveMatch(
-                competition_name = match.get("competition_name"),
-                category = match.get("category"),
-                home_team = match.get("home_team"),
-                away_team = match.get("away_team"),
-                event_status = match.get("event_status"),
-                match_time = match.get("match_time"),
-                current_score = match.get("current_score"),
-                odds = match.get("odds"),
-                fetched_at = datetime.utcnow()
-            )
-            session.add(live_match)
+            match_data = {
+                "match_id": match.get("match_id"),
+                "competition_name": match.get("competition_name"),
+                "category": category,
+                "home_team": match.get("home_team"),
+                "away_team": match.get("away_team"),
+                "start_time": datetime.fromisoformat(match.get("start_time")) if match.get("start_time") else None,
+            }
+            match_data_list.append(match_data)
+
+        # Perform bulk upsert for all matches
+        set_dict = {col.name: getattr(excluded, col.name) for col in Match.__table__.columns if col.name != 'match_id'}
+        stmt = insert(Match).values(match_data_list)
+        stmt = stmt.on_conflict_do_update(index_elements=['match_id'], set_=set_dict)
+        await session.execute(stmt)
+
+        # Collect odds data for bulk insert
+        odds_data_list = []
+        for match in matches:
+            odds_data = {
+                "match_id": match.get("match_id"),
+                "event_status": match.get("event_status"),
+                "match_time": match.get("match_time"),
+                "current_score": match.get("current_score"),
+                "odds": match.get("odds"),
+                "fetched_at": datetime.utcnow(),
+            }
+            odds_data_list.append(odds_data)
+
+        # Perform bulk insert for odds
+        await session.execute(insert(Odds).values(odds_data_list))
+
         try:
             await session.commit()
         except Exception as e:
             await session.rollback()
-            print(f"Error saving live data: {e}")
+            print(f"Error saving {category} data: {e}")
 
-async def fetch_and_store_football():
-    url = FOOTBALL_URL
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            data = response.json()
-            matches = data.get("data", [])
-    except Exception as e:
-        print(f"Error fetching football data: {e}")
-        return
+async def periodic_fetch_live():
+    while True:
+        await fetch_and_store_data(LIVE_URL, "live")
+        await asyncio.sleep(10)  # 10 seconds
 
-    async with async_session() as session:
-        for match in matches:
-            try:
-                start_time = datetime.fromisoformat(match.get("start_time"))
-            except Exception:
-                start_time = None
-
-            football_match = FootballMatch(
-                start_time = start_time,
-                competition_name = match.get("competition_name"),
-                category = match.get("category"),
-                home_team = match.get("home_team"),
-                away_team = match.get("away_team"),
-                odds = match.get("odds"),
-                fetched_at = datetime.utcnow()
-            )
-            session.add(football_match)
-        try:
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
-            print(f"Error saving football data: {e}")
-
-async def fetch_and_store_basketball():
-    url = BASKETBALL_URL
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            data = response.json()
-            matches = data.get("data", [])
-    except Exception as e:
-        print(f"Error fetching basketball data: {e}")
-        return
-
-    async with async_session() as session:
-        for match in matches:
-            try:
-                start_time = datetime.fromisoformat(match.get("start_time"))
-            except Exception:
-                start_time = None
-
-            basketball_match = BasketballMatch(
-                start_time = start_time,
-                competition_name = match.get("competition_name"),
-                category = match.get("category"),
-                home_team = match.get("home_team"),
-                away_team = match.get("away_team"),
-                odds = match.get("odds"),
-                fetched_at = datetime.utcnow()
-            )
-            session.add(basketball_match)
-        try:
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
-            print(f"Error saving basketball data: {e}")
-
-# --------------------------
-# Lifespan Event Handler
-# --------------------------
+async def periodic_fetch_others():
+    while True:
+        await fetch_and_store_data(FOOTBALL_URL, "football")
+        await fetch_and_store_data(BASKETBALL_URL, "basketball")
+        await asyncio.sleep(300)  # 5 minutes
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    background_task = asyncio.create_task(periodic_fetch())
+    background_task_live = asyncio.create_task(periodic_fetch_live())
+    background_task_others = asyncio.create_task(periodic_fetch_others())
     yield
-    background_task.cancel()
+    background_task_live.cancel()
+    background_task_others.cancel()
     try:
-        await background_task
+        await background_task_live
+    except asyncio.CancelledError:
+        pass
+    try:
+        await background_task_others
     except asyncio.CancelledError:
         pass
 
-async def periodic_fetch():
-    while True:
-        await fetch_and_store_live()
-        await fetch_and_store_football()
-        await fetch_and_store_basketball()
-        await asyncio.sleep(10)
-
-# Create the FastAPI app with the lifespan handler
 app = FastAPI(lifespan=lifespan)
-
-# --------------------------
-# API Endpoints
-# --------------------------
 
 @app.get("/fetch/live")
 async def fetch_live_endpoint():
-    await fetch_and_store_live()
+    await fetch_and_store_data(LIVE_URL, "live")
     return {"message": "Live odds fetched and stored using SQLAlchemy."}
 
 @app.get("/fetch/football")
 async def fetch_football_endpoint():
-    await fetch_and_store_football()
+    await fetch_and_store_data(FOOTBALL_URL, "football")
     return {"message": "Football odds fetched and stored using SQLAlchemy."}
 
 @app.get("/fetch/basketball")
 async def fetch_basketball_endpoint():
-    await fetch_and_store_basketball()
+    await fetch_and_store_data(BASKETBALL_URL, "basketball")
     return {"message": "Basketball odds fetched and stored using SQLAlchemy."}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
