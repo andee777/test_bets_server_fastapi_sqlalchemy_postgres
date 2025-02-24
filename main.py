@@ -102,46 +102,46 @@ async def fetch_and_store_data(url: str, category: str):
         await session.execute(stmt)
 
         # Prepare odds data for bulk insert
-        odds_data_list = []
-        for match in matches:
-            # Initialize odds values
-            home_win = None
-            draw = None
-            away_win = None
+        # odds_data_list = []
+        # for match in matches:
+        #     # Initialize odds values
+        #     home_win = None
+        #     draw = None
+        #     away_win = None
 
-            # For pre game matches (football and basketball) use direct fields
-            if category in ("football", "basketball"):
-                home_win = match.get("home_odd")
-                draw = match.get("neutral_odd")
-                away_win = match.get("away_odd")
-            else:
-                # For live matches, process the odds array to find 1X2 odds if available
-                odds_array = match.get("odds", [])
-                for group in odds_array:
-                    if group.get("name") == "1X2":
-                        for odd in group.get("odds", []):
-                            display = odd.get("display")
-                            if display == "1":
-                                home_win = odd.get("odd_value")
-                            elif display.upper() == "X":
-                                draw = odd.get("odd_value")
-                            elif display == "2":
-                                away_win = odd.get("odd_value")
+        #     # For pre game matches (football and basketball) use direct fields
+        #     if category in ("football", "basketball"):
+        #         home_win = match.get("home_odd")
+        #         draw = match.get("neutral_odd")
+        #         away_win = match.get("away_odd")
+        #     else:
+        #         # For live matches, process the odds array to find 1X2 odds if available
+        #         odds_array = match.get("odds", [])
+        #         for group in odds_array:
+        #             if group.get("name") == "1X2":
+        #                 for odd in group.get("odds", []):
+        #                     display = odd.get("display")
+        #                     if display == "1":
+        #                         home_win = odd.get("odd_value")
+        #                     elif display.upper() == "X":
+        #                         draw = odd.get("odd_value")
+        #                     elif display == "2":
+        #                         away_win = odd.get("odd_value")
 
-            odds_data = {
-                "match_id": match.get("match_id"),
-                "event_status": match.get("event_status"),
-                "match_time": match.get("match_time"),
-                "current_score": match.get("current_score"),
-                "home_win": home_win,
-                "draw": draw,
-                "away_win": away_win,
-                "fetched_at": datetime.utcnow(),
-            }
-            odds_data_list.append(odds_data)
+        #     odds_data = {
+        #         "match_id": match.get("match_id"),
+        #         "event_status": match.get("event_status"),
+        #         "match_time": match.get("match_time"),
+        #         "current_score": match.get("current_score"),
+        #         "home_win": home_win,
+        #         "draw": draw,
+        #         "away_win": away_win,
+        #         "fetched_at": datetime.utcnow(),
+        #     }
+        #     odds_data_list.append(odds_data)
 
-        # Insert odds data into the Odds table
-        await session.execute(insert(Odds).values(odds_data_list))
+        # # Insert odds data into the Odds table
+        # await session.execute(insert(Odds).values(odds_data_list))
 
         try:
             await session.commit()
