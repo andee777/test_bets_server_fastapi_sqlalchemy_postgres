@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, Integer, Text, DateTime, String, BigInteger, ForeignKey
+from sqlalchemy import Column, Text, DateTime, String, BigInteger, ForeignKey
 from sqlalchemy.dialects.postgresql import insert
 
 import httpx
@@ -83,7 +83,7 @@ async def fetch_and_store_data(url: str, category: str):
             }
             match_data_list.append(match_data)
 
-        # Upsert matches
+        # Upsert matches into the Match table
         stmt = insert(Match)
         set_dict = {
             col.name: getattr(stmt.excluded, col.name)
@@ -102,18 +102,26 @@ async def fetch_and_store_data(url: str, category: str):
             home_win = None
             draw = None
             away_win = None
-            # Only process the 1X2 odds if available
-            odds_array = match.get("odds", [])
-            for group in odds_array:
-                if group.get("name") == "1X2":
-                    for odd in group.get("odds", []):
-                        display = odd.get("display")
-                        if display == "1":
-                            home_win = odd.get("odd_value")
-                        elif display.upper() == "X":
-                            draw = odd.get("odd_value")
-                        elif display == "2":
-                            away_win = odd.get("odd_value")
+
+            # For pre game matches (football and basketball) use direct fields
+            if category in ("football", "basketball"):
+                home_win = match.get("home_odd")
+                draw = match.get("neutral_odd")
+                away_win = match.get("away_odd")
+            else:
+                # For live matches, process the odds array to find 1X2 odds if available
+                odds_array = match.get("odds", [])
+                for group in odds_array:
+                    if group.get("name") == "1X2":
+                        for odd in group.get("odds", []):
+                            display = odd.get("display")
+                            if display == "1":
+                                home_win = odd.get("odd_value")
+                            elif display.upper() == "X":
+                                draw = odd.get("odd_value")
+                            elif display == "2":
+                                away_win = odd.get("odd_value")
+
             odds_data = {
                 "match_id": match.get("match_id"),
                 "event_status": match.get("event_status"),
@@ -126,7 +134,7 @@ async def fetch_and_store_data(url: str, category: str):
             }
             odds_data_list.append(odds_data)
 
-        # Insert odds data
+        # Insert odds data into the Odds table
         await session.execute(insert(Odds).values(odds_data_list))
 
         try:
