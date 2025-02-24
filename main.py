@@ -14,7 +14,8 @@ from contextlib import asynccontextmanager
 import logging
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -63,6 +64,8 @@ class Odds(Base):
     fetched_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 async def fetch_and_store_data(url: str, category: str):
+    logger.info(f"--------- periodic_fetch___{category} ---------")
+
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url)
@@ -149,18 +152,15 @@ async def fetch_and_store_data(url: str, category: str):
             logger.info(f"Error saving {category} data: {e}")
 
 async def periodic_fetch_live():
-    logger.info("--------- periodic_fetch_live ---------")
     while True:
         await fetch_and_store_data(LIVE_URL, "live")
-        await asyncio.sleep(10)  # 10 seconds
+        await asyncio.sleep(10)
 
 async def periodic_fetch_others():
     while True:
-        logger.info("--------- periodic_fetch_football ---------")
         await fetch_and_store_data(FOOTBALL_URL, "football")
-        logger.info("--------- periodic_fetch_basketball ---------")
         await fetch_and_store_data(BASKETBALL_URL, "basketball")
-        await asyncio.sleep(20)  # 5 minutes
+        await asyncio.sleep(20)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
