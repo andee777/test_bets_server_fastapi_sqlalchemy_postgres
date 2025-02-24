@@ -43,7 +43,7 @@ Base = declarative_base()
 # Define the Models
 class Match(Base):
     __tablename__ = 'Match'
-    match_id = Column(BigInteger, primary_key=True, index=True)
+    match_id = Column(int, primary_key=True, index=True)
     competition_name = Column(Text, index=True)
     category = Column(Text)
     home_team = Column(Text)
@@ -52,8 +52,8 @@ class Match(Base):
 
 class Odds(Base):
     __tablename__ = 'Odds'
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    match_id = Column(BigInteger, ForeignKey('matches.match_id'), index=True)
+    id = Column(int, primary_key=True, autoincrement=True)
+    match_id = Column(int, ForeignKey('matches.match_id'), index=True)
     event_status = Column(Text)
     match_time = Column(Text)
     current_score = Column(Text)
@@ -62,6 +62,7 @@ class Odds(Base):
     draw = Column(String)
     away_win = Column(String)
     fetched_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 
 async def fetch_and_store_data(url: str, category: str):
     logger.info(f"--------- periodic_fetch___{category} ---------")
