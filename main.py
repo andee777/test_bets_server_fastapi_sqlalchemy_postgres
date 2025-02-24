@@ -95,7 +95,7 @@ async def fetch_and_store_data(url: str, category: str):
             col.name: getattr(stmt.excluded, col.name)
             for col in Match.__table__.columns if col.name != 'match_id'
         }
-        stmt = stmt.values(match_data_list).on_conflict_do_update(
+        stmt = stmt.values(match_data_list[:20]).on_conflict_do_update(
             index_elements=['match_id'],
             set_=set_dict
         )
