@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, Integer, Text, JSON, DateTime, String, BigInteger, ForeignKey
+from sqlalchemy import Column, Integer, Text, DateTime, String, BigInteger, ForeignKey
 from sqlalchemy.dialects.postgresql import insert
 
 import httpx
@@ -51,7 +51,10 @@ class Odds(Base):
     event_status = Column(Text)
     match_time = Column(Text)
     current_score = Column(Text)
-    odds = Column(JSON)
+    # Separate columns for 1X2 odds
+    home_win = Column(String)
+    draw = Column(String)
+    away_win = Column(String)
     fetched_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 async def fetch_and_store_data(url: str, category: str):
@@ -80,15 +83,12 @@ async def fetch_and_store_data(url: str, category: str):
             }
             match_data_list.append(match_data)
 
-        # Create the base insert statement for the Match table
+        # Upsert matches
         stmt = insert(Match)
-        # Build the dictionary for the ON CONFLICT DO UPDATE clause,
-        # using the .excluded attribute from the insert statement.
         set_dict = {
             col.name: getattr(stmt.excluded, col.name)
             for col in Match.__table__.columns if col.name != 'match_id'
         }
-        # Complete the upsert statement with the provided match data list
         stmt = stmt.values(match_data_list).on_conflict_do_update(
             index_elements=['match_id'],
             set_=set_dict
@@ -98,17 +98,35 @@ async def fetch_and_store_data(url: str, category: str):
         # Prepare odds data for bulk insert
         odds_data_list = []
         for match in matches:
+            # Initialize odds values
+            home_win = None
+            draw = None
+            away_win = None
+            # Only process the 1X2 odds if available
+            odds_array = match.get("odds", [])
+            for group in odds_array:
+                if group.get("name") == "1X2":
+                    for odd in group.get("odds", []):
+                        display = odd.get("display")
+                        if display == "1":
+                            home_win = odd.get("odd_value")
+                        elif display.upper() == "X":
+                            draw = odd.get("odd_value")
+                        elif display == "2":
+                            away_win = odd.get("odd_value")
             odds_data = {
                 "match_id": match.get("match_id"),
                 "event_status": match.get("event_status"),
                 "match_time": match.get("match_time"),
                 "current_score": match.get("current_score"),
-                "odds": match.get("odds"),
+                "home_win": home_win,
+                "draw": draw,
+                "away_win": away_win,
                 "fetched_at": datetime.utcnow(),
             }
             odds_data_list.append(odds_data)
 
-        # Insert odds data (no upsert assumed here)
+        # Insert odds data
         await session.execute(insert(Odds).values(odds_data_list))
 
         try:
@@ -116,7 +134,6 @@ async def fetch_and_store_data(url: str, category: str):
         except Exception as e:
             await session.rollback()
             print(f"Error saving {category} data: {e}")
-
 
 async def periodic_fetch_live():
     while True:
