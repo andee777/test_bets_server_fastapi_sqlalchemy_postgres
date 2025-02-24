@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 import logging
 
 logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Load environment variables from .env file
