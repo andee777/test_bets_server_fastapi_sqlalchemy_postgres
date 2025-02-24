@@ -63,7 +63,6 @@ class Odds(Base):
     fetched_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 async def fetch_and_store_data(url: str, category: str):
-    logger.info(f'- fetch_and_store_data: category: {category}')
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url)
@@ -71,7 +70,7 @@ async def fetch_and_store_data(url: str, category: str):
             data = response.json()
             matches = data.get("data", [])
     except Exception as e:
-        print(f"Error fetching {category} data: {e}")
+        logger.info(f"Error fetching {category} data: {e}")
         return
 
     async with async_session() as session:
@@ -88,7 +87,7 @@ async def fetch_and_store_data(url: str, category: str):
                     if match.get("start_time") else None,
             }
             match_data_list.append(match_data)
-        logger.info(f'- fetch_and_store_data: len matches: {len(matches)}, len match_data_list: {len(match_data_list)}')
+        logger.info(f'- fetch_and_store_data__{category}: len matches: {len(matches)}, len match_data_list: {len(match_data_list)}')
 
         # Upsert matches into the Match table
         stmt = insert(Match)
@@ -148,7 +147,7 @@ async def fetch_and_store_data(url: str, category: str):
             await session.commit()
         except Exception as e:
             await session.rollback()
-            print(f"Error saving {category} data: {e}")
+            logger.info(f"Error saving {category} data: {e}")
 
 async def periodic_fetch_live():
     logger.info("--------- periodic_fetch_live ---------")
