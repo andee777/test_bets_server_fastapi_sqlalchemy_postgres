@@ -159,7 +159,9 @@ async def periodic_fetch_others():
     logger.info("--------- periodic_fetch_others ---------")
     while True:
         await fetch_and_store_data(FOOTBALL_URL, "football")
+        logger.info("--------- periodic_fetch_others__football___OK ---------")
         await fetch_and_store_data(BASKETBALL_URL, "basketball")
+        logger.info("--------- periodic_fetch_others__basketball___OK ---------")
         await asyncio.sleep(20)  # 5 minutes
 
 @asynccontextmanager
