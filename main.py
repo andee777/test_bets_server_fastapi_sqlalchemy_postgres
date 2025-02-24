@@ -95,7 +95,7 @@ async def fetch_and_store_data(url: str, category: str):
             col.name: getattr(stmt.excluded, col.name)
             for col in Match.__table__.columns if col.name != 'match_id'
         }
-        batch_size = 100
+        batch_size = 20
         for i in range(0, len(match_data_list), batch_size):
             batch = match_data_list[i:i + batch_size]
             stmt = insert(Match).values(batch).on_conflict_do_update(
@@ -103,7 +103,7 @@ async def fetch_and_store_data(url: str, category: str):
                 set_=set_dict
             )
             await session.execute(stmt)
-            
+
         # Prepare odds data for bulk insert
         odds_data_list = []
         for match in matches:
