@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import Column, Integer, Text, JSON, DateTime, String, BigInteger, ForeignKey
-from sqlalchemy.dialects.postgresql import insert, excluded
+from sqlalchemy.dialects.postgresql import insert
 
 import httpx
 import asyncio
@@ -66,7 +66,7 @@ async def fetch_and_store_data(url: str, category: str):
         return
 
     async with async_session() as session:
-        # Handle match insertions/updates
+        # Prepare match data for bulk upsert
         match_data_list = []
         for match in matches:
             match_data = {
@@ -75,17 +75,27 @@ async def fetch_and_store_data(url: str, category: str):
                 "category": category,
                 "home_team": match.get("home_team"),
                 "away_team": match.get("away_team"),
-                "start_time": datetime.fromisoformat(match.get("start_time")) if match.get("start_time") else None,
+                "start_time": datetime.fromisoformat(match.get("start_time"))
+                    if match.get("start_time") else None,
             }
             match_data_list.append(match_data)
 
-        # Perform bulk upsert for all matches
-        set_dict = {col.name: getattr(excluded, col.name) for col in Match.__table__.columns if col.name != 'match_id'}
-        stmt = insert(Match).values(match_data_list)
-        stmt = stmt.on_conflict_do_update(index_elements=['match_id'], set_=set_dict)
+        # Create the base insert statement for the Match table
+        stmt = insert(Match)
+        # Build the dictionary for the ON CONFLICT DO UPDATE clause,
+        # using the .excluded attribute from the insert statement.
+        set_dict = {
+            col.name: getattr(stmt.excluded, col.name)
+            for col in Match.__table__.columns if col.name != 'match_id'
+        }
+        # Complete the upsert statement with the provided match data list
+        stmt = stmt.values(match_data_list).on_conflict_do_update(
+            index_elements=['match_id'],
+            set_=set_dict
+        )
         await session.execute(stmt)
 
-        # Collect odds data for bulk insert
+        # Prepare odds data for bulk insert
         odds_data_list = []
         for match in matches:
             odds_data = {
@@ -98,7 +108,7 @@ async def fetch_and_store_data(url: str, category: str):
             }
             odds_data_list.append(odds_data)
 
-        # Perform bulk insert for odds
+        # Insert odds data (no upsert assumed here)
         await session.execute(insert(Odds).values(odds_data_list))
 
         try:
@@ -106,6 +116,7 @@ async def fetch_and_store_data(url: str, category: str):
         except Exception as e:
             await session.rollback()
             print(f"Error saving {category} data: {e}")
+
 
 async def periodic_fetch_live():
     while True:
