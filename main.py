@@ -83,6 +83,8 @@ async def fetch_and_store_data(url: str, category: str):
         for match in matches:
             if not match.get("match_id"):
                 continue  # Skip odds insertion if match_id is missing
+            if category == 'live':
+                logger.info(f"- live game: {match.get("match_id")}")
             match_data = {
                 "match_id": match.get("match_id"),
                 "competition_name": match.get("competition_name"),
