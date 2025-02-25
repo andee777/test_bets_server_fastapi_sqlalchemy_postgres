@@ -53,7 +53,7 @@ class Match(Base):
 class Odds(Base):
     __tablename__ = 'Odds'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    match_id = Column(Integer, ForeignKey('Match.match_id'), index=True)
+    match_id = Column(Text, ForeignKey('Match.match_id'), index=True)
     event_status = Column(Text)
     match_time = Column(Text)
     current_score = Column(Text)
@@ -132,7 +132,7 @@ async def fetch_and_store_data(url: str, category: str):
                                 away_win = odd.get("odd_value")
 
             odds_data = {
-                "match_id": int(match.get("match_id")),
+                "match_id": f'{match.get("match_id")}',
                 "event_status": match.get("event_status"),
                 "match_time": match.get("match_time"),
                 "current_score": match.get("current_score"),
