@@ -81,10 +81,11 @@ async def fetch_and_store_data(url: str, category: str):
         # Prepare match data for bulk upsert
         match_data_list = []
         for match in matches:
-            if not match.get("match_id"):
+            match_id = match.get("match_id")
+            if not match_id:
                 continue  # Skip odds insertion if match_id is missing
             if category == 'live':
-                logger.info(f"- live game: {match.get("match_id")}")
+                logger.info(f"- live game: {match_id}")
             match_data = {
                 "match_id": match.get("match_id"),
                 "competition_name": match.get("competition_name"),
@@ -111,7 +112,8 @@ async def fetch_and_store_data(url: str, category: str):
         # Prepare odds data for bulk insert
         odds_data_list = []
         for match in matches:
-            if not match.get("match_id"):
+            match_id = match.get("match_id")
+            if not match_id:
                 continue  # Skip odds insertion if match_id is missing
             # Initialize odds values
             home_win = None
