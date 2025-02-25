@@ -84,7 +84,7 @@ async def fetch_and_store_data(url: str, category: str):
             if not match.get("match_id"):
                 continue  # Skip odds insertion if match_id is missing
             match_data = {
-                "match_id": f'{match.get("match_id")}',
+                "match_id": match.get("match_id"),
                 "competition_name": match.get("competition_name"),
                 "category": category,
                 "home_team": match.get("home_team"),
@@ -136,7 +136,7 @@ async def fetch_and_store_data(url: str, category: str):
                                 away_win = odd.get("odd_value")
 
             odds_data = {
-                "match_id": f'{match.get("match_id")}',
+                "match_id": match.get("match_id"),
                 "event_status": match.get("event_status"),
                 "match_time": match.get("match_time"),
                 "current_score": match.get("current_score"),
