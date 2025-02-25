@@ -43,7 +43,7 @@ Base = declarative_base()
 # Define the Models
 class Match(Base):
     __tablename__ = 'Match'
-    match_id = Column(Integer, primary_key=True, index=True)
+    match_id = Column(Text, primary_key=True, index=True)
     competition_name = Column(Text, index=True)
     category = Column(Text)
     home_team = Column(Text)
@@ -82,7 +82,7 @@ async def fetch_and_store_data(url: str, category: str):
         match_data_list = []
         for match in matches:
             match_data = {
-                "match_id": int(match.get("match_id")),
+                "match_id": f'{match.get("match_id")}',
                 "competition_name": match.get("competition_name"),
                 "category": category,
                 "home_team": match.get("home_team"),
