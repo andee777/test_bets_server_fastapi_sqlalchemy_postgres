@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import Column, Text, DateTime, String, Integer, ForeignKey, update
-from sqlalchemy.dialects.postgresql import insert, select, update
+from sqlalchemy import insert, select, update
 
 import httpx
 import asyncio
