@@ -48,6 +48,7 @@ class Match(Base):
     category = Column(Text)
     home_team = Column(Text)
     away_team = Column(Text)
+    event_status = Column(Text)
     start_time = Column(DateTime)
 
 class Odds(Base):
@@ -64,7 +65,7 @@ class Odds(Base):
     fetched_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
-async def fetch_and_store_data(url: str, category: str):
+async def fetch_and_store_data(url: str, category: str, event_status: str):
     logger.info(f"--------- periodic_fetch___{category} ---------")
 
     try:
@@ -82,20 +83,20 @@ async def fetch_and_store_data(url: str, category: str):
         match_data_list = []
         for match in matches:
             match_id = match.get("match_id")
-            if not match_id:
-                continue  # Skip odds insertion if match_id is missing
-            if category == 'live':
-                logger.info(f"- live game: {match_id}")
-            match_data = {
-                "match_id": f"{match_id}",
-                "competition_name": match.get("competition_name"),
-                "category": category,
-                "home_team": match.get("home_team"),
-                "away_team": match.get("away_team"),
-                "start_time": datetime.fromisoformat(match.get("start_time"))
-                    if match.get("start_time") else None,
-            }
-            match_data_list.append(match_data)
+            if match_id:
+                if event_status == 'live':
+                    logger.info(f"- live game: {match_id}")
+                match_data = {
+                    "match_id": f"{match_id}",
+                    "competition_name": match.get("competition_name"),
+                    "category": category,
+                    "event_status": event_status,
+                    "home_team": match.get("home_team"),
+                    "away_team": match.get("away_team"),
+                    "start_time": datetime.fromisoformat(match.get("start_time"))
+                        if match.get("start_time") else None,
+                }
+                match_data_list.append(match_data)
 
         # Upsert matches into the Match table
         stmt = insert(Match)
@@ -162,13 +163,13 @@ async def fetch_and_store_data(url: str, category: str):
 
 async def periodic_fetch_live():
     while True:
-        await fetch_and_store_data(LIVE_URL, "live")
+        await fetch_and_store_data(LIVE_URL, "football", "live")
         await asyncio.sleep(10)
 
 async def periodic_fetch_others():
     while True:
-        await fetch_and_store_data(FOOTBALL_URL, "football")
-        await fetch_and_store_data(BASKETBALL_URL, "basketball")
+        await fetch_and_store_data(FOOTBALL_URL, "football", "not started")
+        await fetch_and_store_data(BASKETBALL_URL, "basketball", "not started")
         await asyncio.sleep(300)
 
 @asynccontextmanager
