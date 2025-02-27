@@ -84,13 +84,15 @@ async def fetch_and_store_data(url: str, category: str, event_status: str):
         for match in matches:
             match_id = match.get("match_id")
             if match_id:
+                match_status = event_status
                 if event_status == 'live':
                     logger.info(f"- live game: {match_id}")
+                    match_status = match.get("event_status")
                 match_data = {
                     "match_id": f"{match_id}",
                     "competition_name": match.get("competition_name"),
                     "category": category,
-                    "event_status": event_status,
+                    "event_status": match_status,
                     "home_team": match.get("home_team"),
                     "away_team": match.get("away_team"),
                     "start_time": datetime.fromisoformat(match.get("start_time"))
