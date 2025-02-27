@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, Text, DateTime, String, Integer, ForeignKey
+from sqlalchemy import Column, Text, DateTime, String, Integer, ForeignKey, update
 from sqlalchemy.dialects.postgresql import insert
 
 import httpx
@@ -64,7 +64,6 @@ class Odds(Base):
     away_win = Column(String)
     fetched_at = Column(DateTime, default=datetime.utcnow, index=True)
 
-
 async def fetch_and_store_data(url: str, category: str, event_status: str):
     logger.info(f"--------- periodic_fetch___{category}___{event_status} ---------")
 
@@ -88,6 +87,7 @@ async def fetch_and_store_data(url: str, category: str, event_status: str):
                     match_status = event_status
                     if event_status == 'live':
                         logger.info(f"- live game: {match_id}")
+                        # Build a detailed live status string
                         match_status = f'{match.get("event_status")} - {match.get("match_status")} - {match.get("ft_score")}'
                     match_data = {
                         "match_id": f"{match_id}",
@@ -113,6 +113,24 @@ async def fetch_and_store_data(url: str, category: str, event_status: str):
             )
             await session.execute(stmt)
 
+            # If this is a live fetch, update any live matches that are no longer present to 'ended'
+            if event_status == 'live':
+                # Extract the match_ids from the current response
+                live_match_ids = [match.get("match_id") for match in matches if match.get("match_id")]
+                if live_match_ids:
+                    update_stmt = update(Match).where(
+                        Match.category == category,
+                        ~Match.match_id.in_(live_match_ids),
+                        Match.event_status != "ended"
+                    ).values(event_status="ended")
+                else:
+                    # If no live match ids in response, update all live games in the category
+                    update_stmt = update(Match).where(
+                        Match.category == category,
+                        Match.event_status != "ended"
+                    ).values(event_status="ended")
+                await session.execute(update_stmt)
+
             # Prepare odds data for bulk insert
             odds_data_list = []
             for match in matches:
@@ -125,7 +143,7 @@ async def fetch_and_store_data(url: str, category: str, event_status: str):
                 away_win = None
 
                 # For pre game matches (football and basketball) use direct fields
-                if category in ("football", "basketball"):
+                if category in ("football", "basketball") and event_status != 'live':
                     home_win = match.get("home_odd")
                     draw = match.get("neutral_odd")
                     away_win = match.get("away_odd")
@@ -197,17 +215,17 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/fetch/live")
 async def fetch_live_endpoint():
-    await fetch_and_store_data(LIVE_URL, "live")
+    await fetch_and_store_data(LIVE_URL, "football", "live")
     return {"message": "Live odds fetched and stored using SQLAlchemy."}
 
 @app.get("/fetch/football")
 async def fetch_football_endpoint():
-    await fetch_and_store_data(FOOTBALL_URL, "football")
+    await fetch_and_store_data(FOOTBALL_URL, "football", "not started")
     return {"message": "Football odds fetched and stored using SQLAlchemy."}
 
 @app.get("/fetch/basketball")
 async def fetch_basketball_endpoint():
-    await fetch_and_store_data(BASKETBALL_URL, "basketball")
+    await fetch_and_store_data(BASKETBALL_URL, "basketball", "not started")
     return {"message": "Basketball odds fetched and stored using SQLAlchemy."}
 
 if __name__ == "__main__":
