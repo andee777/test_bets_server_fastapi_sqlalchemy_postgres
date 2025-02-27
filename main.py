@@ -88,7 +88,7 @@ async def fetch_and_store_data(url: str, category: str, event_status: str):
                     match_status = event_status
                     if event_status == 'live':
                         logger.info(f"- live game: {match_id}")
-                        match_status = match.get("event_status")
+                        match_status = f'{match.get("event_status")} - {match.get("match_status")} - {match.get("ft_score")}'
                     match_data = {
                         "match_id": f"{match_id}",
                         "competition_name": match.get("competition_name"),
