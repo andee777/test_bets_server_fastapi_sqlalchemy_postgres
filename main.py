@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import Column, Text, DateTime, String, Integer, ForeignKey, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import insert, select, update
 
 import httpx
 import asyncio
@@ -113,23 +113,29 @@ async def fetch_and_store_data(url: str, category: str, event_status: str):
             )
             await session.execute(stmt)
 
-            # If this is a live fetch, update any live matches that are no longer present to 'ended'
+            # Only for live fetches, perform the comparison/update logic.
             if event_status == 'live':
-                # Extract the match_ids from the current response
-                live_match_ids = [match.get("match_id") for match in matches if match.get("match_id")]
-                if live_match_ids:
-                    update_stmt = update(Match).where(
+                # Get the list of match_ids from the API response
+                api_match_ids = [match.get("match_id") for match in matches if match.get("match_id")]
+
+                # First, retrieve match_ids from the DB that do NOT have "not started" as event_status.
+                result = await session.execute(
+                    select(Match.match_id).where(
                         Match.category == category,
-                        ~Match.match_id.in_(live_match_ids),
-                        Match.event_status != "ended"
-                    ).values(event_status="ended")
-                else:
-                    # If no live match ids in response, update all live games in the category
+                        Match.event_status != "not started"
+                    )
+                )
+                db_match_ids = [row[0] for row in result.fetchall()]
+
+                # Determine which match_ids in the DB are not present in the API response.
+                to_update_ids = [mid for mid in db_match_ids if mid not in api_match_ids]
+
+                if to_update_ids:
+                    logger.info(f"Updating matches not in API response: {to_update_ids}")
                     update_stmt = update(Match).where(
-                        Match.category == category,
-                        Match.event_status != "ended"
+                        Match.match_id.in_(to_update_ids)
                     ).values(event_status="ended")
-                await session.execute(update_stmt)
+                    await session.execute(update_stmt)
 
             # Prepare odds data for bulk insert
             odds_data_list = []
