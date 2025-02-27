@@ -66,7 +66,7 @@ class Odds(Base):
 
 
 async def fetch_and_store_data(url: str, category: str, event_status: str):
-    logger.info(f"--------- periodic_fetch___{category} ---------")
+    logger.info(f"--------- periodic_fetch___{category}___{event_status} ---------")
 
     try:
         async with httpx.AsyncClient() as client:
