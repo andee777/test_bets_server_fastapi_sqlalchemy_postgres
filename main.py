@@ -4,7 +4,8 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import Column, Text, DateTime, String, Integer, ForeignKey, update
-from sqlalchemy import insert, select, update
+from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert
 
 import httpx
 import asyncio
@@ -34,7 +35,6 @@ BASKETBALL_URL = os.getenv("BASKETBALL_URL")
 
 # Create the database URL
 DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-
 # Create SQLAlchemy async engine and session maker
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
@@ -86,9 +86,9 @@ async def fetch_and_store_data(url: str, category: str, event_status: str):
                 if match_id:
                     match_status = event_status
                     if event_status == 'live':
-                        logger.info(f"- live game: {match_id}")
+                        # logger.info(f"- live game: {match_id}")
                         # Build a detailed live status string
-                        match_status = f'{match.get("event_status")} - {match.get("match_status")} - {match.get("ft_score")}'
+                        match_status = f'live'
                     match_data = {
                         "match_id": f"{match_id}",
                         "competition_name": match.get("competition_name"),
@@ -100,6 +100,7 @@ async def fetch_and_store_data(url: str, category: str, event_status: str):
                             if match.get("start_time") else None,
                     }
                     match_data_list.append(match_data)
+            print(f'-- Starting Upsert {len(match_data_list)} matches into the Match table')
 
             # Upsert matches into the Match table
             stmt = insert(Match)
@@ -112,26 +113,31 @@ async def fetch_and_store_data(url: str, category: str, event_status: str):
                 set_=set_dict
             )
             await session.execute(stmt)
+            print('-- Finished Upsert matches into the Match table')
 
             # Only for live fetches, perform the comparison/update logic.
             if event_status == 'live':
                 # Get the list of match_ids from the API response
-                api_match_ids = [match.get("match_id") for match in matches if match.get("match_id")]
-
+                api_match_ids = [str(match.get("match_id")) for match in matches if match.get("match_id")]
+                print(api_match_ids)
                 # First, retrieve match_ids from the DB that do NOT have "not started" as event_status.
                 result = await session.execute(
                     select(Match.match_id).where(
                         Match.category == category,
-                        Match.event_status != "not started"
+                        Match.event_status == "live"
                     )
                 )
                 db_match_ids = [row[0] for row in result.fetchall()]
-
+                to_update_ids = []
                 # Determine which match_ids in the DB are not present in the API response.
-                to_update_ids = [mid for mid in db_match_ids if mid not in api_match_ids]
+                print(f'db_match_ids: {len(db_match_ids)}')
+                for mid in db_match_ids:
+                    print(f'---- {mid} is in api_match_ids: {str(mid) in api_match_ids}')
+                    if str(mid) not in api_match_ids: 
+                        to_update_ids.append(mid)
 
                 if to_update_ids:
-                    logger.info(f"Updating matches not in API response: {to_update_ids}")
+                    logger.info(f"Updating {len(to_update_ids)} matches not in API response")
                     update_stmt = update(Match).where(
                         Match.match_id.in_(to_update_ids)
                     ).values(event_status="ended")
@@ -187,6 +193,40 @@ async def fetch_and_store_data(url: str, category: str, event_status: str):
             except Exception as e:
                 await session.rollback()
                 logger.info(f"Error saving {category} data: {e}")
+        else:
+            if event_status == 'live':
+                # Get the list of match_ids from the API response
+                api_match_ids = []
+                print(api_match_ids)
+                # First, retrieve match_ids from the DB that do NOT have "not started" as event_status.
+                result = await session.execute(
+                    select(Match.match_id).where(
+                        Match.category == category,
+                        Match.event_status == "live"
+                    )
+                )
+                db_match_ids = [row[0] for row in result.fetchall()]
+                to_update_ids = []
+                # Determine which match_ids in the DB are not present in the API response.
+                print(f'db_match_ids: {len(db_match_ids)}')
+                for mid in db_match_ids:
+                    print(f'---- {mid} is in api_match_ids: {str(mid) in api_match_ids}')
+                    if str(mid) not in api_match_ids: 
+                        to_update_ids.append(mid)
+                print(f'---- to_update_ids: {to_update_ids}')
+
+                if len(to_update_ids) > 0:
+                    logger.info(f"Updating {len(to_update_ids)} matches not in API response")
+                    update_stmt = update(Match).where(
+                        Match.match_id.in_(to_update_ids)
+                    ).values(event_status="ended")
+                    await session.execute(update_stmt)
+                
+                try:
+                    await session.commit()
+                except Exception as e:
+                    await session.rollback()
+                    logger.info(f"Error saving {category} data: {e}")
 
 async def periodic_fetch_live():
     while True:
@@ -195,8 +235,8 @@ async def periodic_fetch_live():
 
 async def periodic_fetch_others():
     while True:
-        await fetch_and_store_data(FOOTBALL_URL, "football", "not started")
-        await fetch_and_store_data(BASKETBALL_URL, "basketball", "not started")
+        await fetch_and_store_data(FOOTBALL_URL, "football", "pregame")
+        await fetch_and_store_data(BASKETBALL_URL, "basketball", "pregame")
         await asyncio.sleep(300)
 
 @asynccontextmanager
@@ -204,18 +244,18 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     background_task_live = asyncio.create_task(periodic_fetch_live())
-    background_task_others = asyncio.create_task(periodic_fetch_others())
+    # background_task_others = asyncio.create_task(periodic_fetch_others())
     yield
     background_task_live.cancel()
-    background_task_others.cancel()
+    # background_task_others.cancel()
     try:
         await background_task_live
     except asyncio.CancelledError:
         pass
-    try:
-        await background_task_others
-    except asyncio.CancelledError:
-        pass
+    # try:
+    #     await background_task_others
+    # except asyncio.CancelledError:
+    #     pass
 
 app = FastAPI(lifespan=lifespan)
 
