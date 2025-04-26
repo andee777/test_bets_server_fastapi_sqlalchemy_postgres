@@ -2,5 +2,7 @@ fastapi
 uvicorn
 sqlalchemy>=1.4
 asyncpg
+psycopg2-binary
 httpx
 python-dotenv
+
