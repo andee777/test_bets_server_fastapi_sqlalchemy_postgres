@@ -34,7 +34,7 @@ async def upsert_matches(session: AsyncSession, matches: list, category: str):
         match_data_list.append(match_data)
 
     if match_data_list:
-        logger.info(f"Upserting {len(match_data_list)} live matches.")
+        # logger.info(f"Upserting {len(match_data_list)} live matches.")
         stmt = insert(Match).values(match_data_list)
         stmt = stmt.on_conflict_do_update(
             index_elements=["match_id"],

@@ -1,10 +1,11 @@
 # app/tasks_archive.py
-from sqlalchemy import select, insert, delete
+from sqlalchemy import select, delete
 from app.models import Match, EndedMatch
 from app.database import async_session  # or your session factory
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
+from sqlalchemy.dialects.postgresql import insert
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,21 @@ async def archive_ended_matches():
         # logger.info(f"------ archive_ended_matches(): len ended_data: {len(ended_data)}")
 
         try:
-            await session.execute(insert(EndedMatch).values(ended_data))
+            batch_size=1000
+            for i in range(0, len(ended_data), batch_size):
+                batch = ended_data[i:i + batch_size]
+
+                stmt = insert(EndedMatch).values(batch)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["match_id"],
+                    set_={
+                        col.name: getattr(stmt.excluded, col.name)
+                        for col in EndedMatch.__table__.columns
+                        if col.name != "match_id"
+                    }
+                )
+
+                await session.execute(stmt)
             await session.execute(delete(Match).where(Match.match_id.in_([m.match_id for m in ended])))
             await session.commit()
             logger.info(f"\n*********************************************************************\n\n\t\tMoved {len(ended)} matches to ended_matches.\n\n*********************************************************************")

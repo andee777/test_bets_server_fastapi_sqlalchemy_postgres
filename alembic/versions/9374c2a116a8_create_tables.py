@@ -145,16 +145,16 @@ def upgrade() -> None:
     op.create_foreign_key('max_odds_away_odds_id_fkey', 'max_odds_away', 'odds', ['odds_id'], ['odds_id'])
 
     # Create the 'user' table
-    op.create_table(
-        'user',
-        sa.Column('user_id', sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column('email', sa.Text(), nullable=False, unique=True),
-        sa.Column('password', sa.Text(), nullable=False),
-        sa.Column('name', sa.Text(), nullable=True),
-        sa.Column('balance', sa.Float(), nullable=False, default=0),
-        sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
-        sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),
-    )
+    # op.create_table(
+    #     'user',
+    #     sa.Column('user_id', sa.Integer(), primary_key=True, autoincrement=True),
+    #     sa.Column('email', sa.Text(), nullable=False, unique=True),
+    #     sa.Column('password', sa.Text(), nullable=False),
+    #     sa.Column('name', sa.Text(), nullable=True),
+    #     sa.Column('balance', sa.Float(), nullable=False, default=0),
+    #     sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
+    #     sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),
+    # )
 
     # Create the 'bet' table
     op.create_table(
@@ -167,6 +167,8 @@ def upgrade() -> None:
         sa.Column('outcome', sa.Text(), nullable=True),  # "pending", "won", "lost"
         sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
         sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),
+        sa.Column('bot', sa.Boolean(), nullable=False, server_default=sa.text('false')),  # new column
+        sa.Column('bot_task', sa.Text(), nullable=True),  # new column
     )
     op.create_foreign_key('bet_user_id_fkey', 'bet', 'user', ['user_id'], ['user_id'])
 
@@ -186,14 +188,14 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     # Drop all tables in reverse order
-    op.drop_table('bet_event')
-    op.drop_table('bet')
-    op.drop_table('user')
-    op.drop_table('max_odds_away')
-    op.drop_table('max_odds_draw')
-    op.drop_table('max_odds_home')
-    op.drop_table('initial_odd')
-    op.drop_table('latest_odd')
-    op.drop_table('odds')
-    op.drop_table('ended_match')
-    op.drop_table('match')
+    # op.drop_table('bet_event')
+    # op.drop_table('bet')
+    # # op.drop_table('user')
+    # op.drop_table('max_odds_away')
+    # op.drop_table('max_odds_draw')
+    # op.drop_table('max_odds_home')
+    # op.drop_table('initial_odd')
+    # op.drop_table('latest_odd')
+    # op.drop_table('odds')
+    # op.drop_table('ended_match')
+    # op.drop_table('match')
