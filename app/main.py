@@ -13,12 +13,10 @@ from app.tasks.fetch_pregame_odds import periodic_fetch_pregame, fetch_and_store
 from app.tasks.fetch_live_odds import periodic_fetch_live, fetch_and_store_live_data
 from app.tasks.cleanup import periodic_cleanup
 from app.tasks.archive_ended_matches import periodic_archive_ended_matches
-from app.tasks.bet_favourite_entering_second_half import periodic_auto_bet_favourite_entering_second_half
 from app.tasks.bet_favourite_second_half import periodic_auto_bet
-from app.tasks.bet_favourite_second_half_tweaked import periodic_auto_bet_favourite_second_half_tweaked
 from app.tasks.bet_favourite_late_matches import periodic_auto_bet_late_game
-from app.tasks.bet_favourite import periodic_auto_bet_favourite
 from app.tasks.bet_favourite_at_mins_75 import periodic_auto_bet_favourite_at_mins_75
+from app.tasks.run_user_bots import periodic_run_all_bots
 from app.config import API_URLS
 
 # Configure logging
@@ -39,12 +37,10 @@ async def lifespan(app: FastAPI):
         # asyncio.create_task(periodic_fetch_pregame())
         asyncio.create_task(periodic_cleanup()),
         asyncio.create_task(periodic_archive_ended_matches()),
-        asyncio.create_task(periodic_auto_bet_favourite_second_half_tweaked()),
-        asyncio.create_task(periodic_auto_bet_favourite_entering_second_half()),
         # asyncio.create_task(periodic_auto_bet()),
-        asyncio.create_task(periodic_auto_bet_late_game()),
-        asyncio.create_task(periodic_auto_bet_favourite()),
-        asyncio.create_task(periodic_auto_bet_favourite_at_mins_75()),
+        # asyncio.create_task(periodic_auto_bet_late_game()),
+        asyncio.create_task(periodic_run_all_bots()),
+        # asyncio.create_task(periodic_auto_bet_favourite_at_mins_75()),
     ]
     try:
         yield

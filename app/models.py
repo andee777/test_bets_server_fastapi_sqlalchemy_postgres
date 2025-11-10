@@ -1,11 +1,30 @@
-from sqlalchemy import Column, Text, DateTime, Integer, Boolean, Float
-from sqlalchemy.orm import declarative_base
+from sqlalchemy import Column, Text, DateTime, Integer, Boolean, Float, ForeignKey, JSON
+from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func # Import func for server_default
 from datetime import datetime
 
 # Base is defined in this file according to your provided code.
 # Ideally, Base should be defined once (e.g., in app/database.py) and imported.
 Base = declarative_base()
+
+class Bot(Base):
+    __tablename__ = "bot"
+
+    bot_id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    public = Column(Boolean, nullable=False, server_default="false")
+    user_id = Column(Integer, ForeignKey("user.user_id"), nullable=False)
+    conditions = Column(JSON, nullable=False)
+    action = Column(Text, nullable=False)
+    bet_amount = Column(Float, nullable=True)
+    active = Column(Boolean, nullable=False, server_default="true")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # # Relationship back to the User model (optional, for ORM joins)
+    # user = relationship("User", back_populates="bots", lazy="joined")
+    # bots = relationship("Bot", back_populates="user", cascade="all, delete-orphan")
 
 class Match(Base):
     __tablename__ = 'match'
@@ -136,6 +155,7 @@ class Bet(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     bot = Column(Boolean, nullable=True)
     bot_task = Column(Text, nullable=True)
+    bot_id = Column(Integer, nullable=True)
 
 # BetEvents table (primary key: bet_event_id)
 class BetEvent(Base):

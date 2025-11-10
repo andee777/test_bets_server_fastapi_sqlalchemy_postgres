@@ -57,7 +57,7 @@ async def auto_place_bets_late_game(session: AsyncSession):
 
         # Condition: we check if any latest odd is between 1 and 1.5 (inclusive of 1, ≤1.5)
         def is_valid(val):
-            return val is not None and 1 <= val <= 1.5
+            return val is not None and 1.1 <= val <= 1.5
 
         if is_valid(latest_odd.home_win):
             bet_type = "home"
