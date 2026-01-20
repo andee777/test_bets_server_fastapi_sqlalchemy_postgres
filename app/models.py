@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Text, DateTime, Integer, Boolean, Float, ForeignKey, JSON
+from sqlalchemy import Column, Text, DateTime, Integer, Boolean, Float, ForeignKey, JSON, Index
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func # Import func for server_default
 from datetime import datetime
@@ -21,10 +21,6 @@ class Bot(Base):
     active = Column(Boolean, nullable=False, server_default="true")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-    # # Relationship back to the User model (optional, for ORM joins)
-    # user = relationship("User", back_populates="bots", lazy="joined")
-    # bots = relationship("Bot", back_populates="user", cascade="all, delete-orphan")
 
 class Match(Base):
     __tablename__ = 'match'
@@ -156,6 +152,8 @@ class Bet(Base):
     bot = Column(Boolean, nullable=True)
     bot_task = Column(Text, nullable=True)
     bot_id = Column(Integer, nullable=True)
+    validated = Column(Boolean)
+    validated_at = Column(DateTime)
 
 # BetEvents table (primary key: bet_event_id)
 class BetEvent(Base):
@@ -166,3 +164,51 @@ class BetEvent(Base):
     bet_type = Column(Text, nullable=False)  # "home", "draw", "away"
     odd_id = Column(Integer, nullable=False)  # The specific odd placed
     outcome = Column(Text, nullable=True)  # "pending", "won", "lost"
+    validated = Column(Boolean)
+    validated_at = Column(DateTime)
+    
+class LeagueTeam(Base):
+    __tablename__ = 'league_team'
+    league_id = Column(Integer, ForeignKey("league.league_id"), primary_key=True, nullable=False)
+    team_id = Column(Integer, ForeignKey("team.team_id"), primary_key=True, nullable=False)
+
+class Team(Base):
+    __tablename__ = 'team'
+    team_id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(Text, nullable=False, index=True)
+
+class League(Base):
+    __tablename__ = 'league'
+    league_id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(Text, nullable=False) 
+    country = Column(Text, nullable=False) 
+    country_code = Column(Text, nullable=True) 
+
+class TeamAlias(Base):
+    __tablename__ = 'team_alias'
+    alias_id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(Integer, nullable=False)
+    alias = Column(Text, nullable=False, index=True)
+
+class LeagueAlias(Base):
+    __tablename__ = 'league_alias'
+    alias_id = Column(Integer, primary_key=True, autoincrement=True)
+    league_id = Column(Integer, nullable=False)
+    alias = Column(Text, nullable=False) 
+
+class SofascoreFt(Base):
+    __tablename__ = 'sofascore_ft'
+    sofascore_id = Column(Integer, nullable=False, primary_key=True)
+    competition_name = Column(Text, nullable=False)
+    category = Column(Text, nullable=True)
+    country = Column(Text, nullable=False)
+    country_code = Column(Text, nullable=False)
+    home_team = Column(Text, nullable=False)
+    home_score = Column(Integer, nullable=False)
+    away_team = Column(Text, nullable=False)
+    away_score = Column(Integer, nullable=False)
+    start_time = Column(DateTime, nullable=False)
+    home_team_id = Column(Integer, nullable=True)
+    away_team_id = Column(Integer, nullable=True)
+    league_id = Column(Integer, nullable=True)
+    match_id = Column(Integer, nullable=True)

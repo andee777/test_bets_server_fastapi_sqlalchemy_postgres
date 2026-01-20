@@ -32,7 +32,7 @@ async def upsert_pregame_matches(session: AsyncSession, matches: list, category:
         match_data_list.append(match_data)
 
     if match_data_list:
-        logger.info(f"Upserting {len(match_data_list)} pregame matches.")
+        # logger.info(f"Upserting {len(match_data_list)} pregame matches.")
         stmt = insert(Match).values(match_data_list)
         stmt = stmt.on_conflict_do_update(
             index_elements=["match_id"],
@@ -41,7 +41,7 @@ async def upsert_pregame_matches(session: AsyncSession, matches: list, category:
         await session.execute(stmt)
 
 async def fetch_and_store_pregame_data(url: str, category: str):
-    logger.info(f"Fetching pregame data for category: {category}")
+    # logger.info(f"Fetching pregame data for category: {category}")
     matches = await fetch_data(url)
 
     async with async_session() as session:

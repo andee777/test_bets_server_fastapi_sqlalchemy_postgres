@@ -7,6 +7,7 @@ from app.models import Match, Odds
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import select, update, not_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+import httpx
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -26,8 +27,8 @@ async def upsert_matches(session: AsyncSession, matches: list, category: str):
             "country": match.get("category"),
             "event_status": match.get("event_status"),
             "live": True,
-            "home_team": match.get("home_team"),
-            "away_team": match.get("away_team"),
+            "home_team": match.get("home_team").strip(),
+            "away_team": match.get("away_team").strip(),
             "start_time": datetime.fromisoformat(match["start_time"]) if match.get("start_time") else None,
             "match_time": match_time,
         }
@@ -66,11 +67,93 @@ async def update_missing_live_matches(session: AsyncSession, matches: list, cate
             else:
                 to_false.append(match_id)
 
+    # logger.info(f"update_missing_live_matches() - to_ended: {to_ended}")
     if to_false:
         await session.execute(update(Match).where(Match.match_id.in_(to_false)).values(live=False, event_status="pending"))
     if to_ended:
         await session.execute(update(Match).where(Match.match_id.in_(to_ended)).values(live=False, event_status="ended"))
     await session.commit()
+
+
+async def check_ended(session: AsyncSession, match_ids: list[int]):
+    """
+    Check if matches have ended by verifying scores from FotMob.
+    Compares matches based on country, home team, and away team names.
+    Updates matches that have ended to live=False and event_status="ended".
+    """
+    if not match_ids:
+        return
+    
+    try:
+        # Fetch match details from database
+        result = await session.execute(
+            select(
+                Match.match_id,
+                Match.country,
+                Match.home_team,
+                Match.away_team
+            ).where(Match.match_id.in_(match_ids))
+        )
+        
+        db_matches = {}
+        for match_id, country, home_team, away_team in result.fetchall():
+            # Normalize for comparison
+            key = (
+                (country or "").strip().lower(),
+                (home_team or "").strip().lower(),
+                (away_team or "").strip().lower()
+            )
+            db_matches[key] = match_id
+        
+        # Get current date in the format FotMob expects (YYYYMMDD)
+        date_str = datetime.now().strftime("%Y%m%d")
+        url = f"https://www.fotmob.com/api/matches?date={date_str}"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=10.0)
+            response.raise_for_status()
+            data = response.json()
+        
+        # Find finished matches that match our database records
+        to_ended = []
+        
+        leagues = data.get("leagues", [])
+        for league in leagues:
+            country = league.get("name", "")  # or use "ccode" for country code
+            matches = league.get("matches", [])
+            
+            for match in matches:
+                status = match.get("status", {})
+                finished = status.get("finished", False)
+                
+                if not finished:
+                    continue
+                
+                home_team = match.get("home", {}).get("name", "")
+                away_team = match.get("away", {}).get("name", "")
+                
+                # Normalize for comparison
+                key = (
+                    country.strip().lower(),
+                    home_team.strip().lower(),
+                    away_team.strip().lower()
+                )
+                
+                # Check if this match is in our to_check_ended list
+                if key in db_matches:
+                    to_ended.append(db_matches[key])
+        
+        if to_ended:
+            await session.execute(
+                update(Match)
+                .where(Match.match_id.in_(to_ended))
+                .values(live=False, event_status="ended")
+            )
+            # logger.info(f"Marked {len(to_ended)} matches as ended: {to_ended}")
+    
+    except Exception as e:
+        # logger.error(f"Error checking ended matches: {e}")
+        pass  # Don't fail the whole process if FotMob check fails
 
 async def handle_missing_live_matches(session: AsyncSession, category: str):
     # logger.info(f"handle_missing_live_matches(): Checking for pending games")
@@ -83,18 +166,19 @@ async def handle_missing_live_matches(session: AsyncSession, category: str):
             ))
         )
     )
-    to_false, to_ended = [], []
+    to_false, to_check_ended = [], []
     for match_id, live, status, match_time in result.fetchall():
         if live and (status or "").lower() != "pregame":
             if match_time == "90:00":
-                to_ended.append(match_id)
+                to_check_ended.append(match_id)
             else:
                 to_false.append(match_id)
 
     if to_false:
         await session.execute(update(Match).where(Match.match_id.in_(to_false)).values(live=False, event_status="pending"))
-    if to_ended:
-        await session.execute(update(Match).where(Match.match_id.in_(to_ended)).values(live=False, event_status="ended"))
+    if to_check_ended:
+        await session.execute(update(Match).where(Match.match_id.in_(to_check_ended)).values(live=False, event_status="ended"))
+        # await check_ended(to_check_ended)
     await session.commit()
 
 async def fetch_and_store_live_data(url: str, category: str):

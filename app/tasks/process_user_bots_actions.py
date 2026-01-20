@@ -108,7 +108,7 @@ async def process_bot_action(session: AsyncSession, bot: Bot, match: Match, init
 
     elif action == "place_bet_draw":
         team_to_bet_on = "draw"
-        odds_to_use = match.get("current_odds_draw")
+        odds_to_use = current_odds_draw
 
     elif action in ["place_bet_live_favourite", "place_bet_live_outsider"]:
         favourite, outsider = get_favourite_and_outsider(current=True)
