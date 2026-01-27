@@ -166,7 +166,7 @@ class BetEvent(Base):
     outcome = Column(Text, nullable=True)  # "pending", "won", "lost"
     validated = Column(Boolean)
     validated_at = Column(DateTime)
-    
+
 class LeagueTeam(Base):
     __tablename__ = 'league_team'
     league_id = Column(Integer, ForeignKey("league.league_id"), primary_key=True, nullable=False)
