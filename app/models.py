@@ -212,5 +212,5 @@ class SofascoreFt(Base):
     home_team_id = Column(Integer, nullable=True)
     away_team_id = Column(Integer, nullable=True)
     league_id = Column(Integer, nullable=True)
-    match_id = Column(Integer, nullable=True)
+    match_id = Column(Text, nullable=True)
     event_status = Column(Text, nullable=True)
