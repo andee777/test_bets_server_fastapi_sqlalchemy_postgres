@@ -24,7 +24,7 @@ async def upsert_matches(session: AsyncSession, matches: list, category: str):
             "match_id": str(match_id),
             "competition_name": match.get("competition_name"),
             "category": category,
-            "country": match.get("category"),
+            "country": str(match.get("category")).replace('Amateur', '').strip(),
             "event_status": match.get("event_status"),
             "live": True,
             "home_team": match.get("home_team").strip(),
