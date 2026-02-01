@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import select, and_, distinct
+from sqlalchemy import select, and_, distinct, func
 from curl_cffi.requests import AsyncSession as CurlSession
 
 from app.database import async_session
@@ -89,34 +89,42 @@ async def find_league_id(db_session, league_name: str, country_code: str):
     return None
 
 async def find_team_id(db_session, team_name: str, league_id: int):
-    """Find team_id by exact match on name or alias within a league."""
-    # First try exact match on team.name
+    """Find team_id by exact match on name or alias within a league (case-insensitive & trimmed)."""
+    
+    # 1. Pre-process the input name (Trim whitespace and convert to Uppercase)
+    clean_name = team_name.strip().upper()
+
+    # First try match on Team.name
     result = await db_session.execute(
         select(Team.team_id)
         .join(LeagueTeam, LeagueTeam.team_id == Team.team_id)
         .where(
             and_(
-                Team.name == team_name,
+                # Trim and Upper the DB column to match the cleaned input
+                func.upper(func.trim(Team.name)) == clean_name,
                 LeagueTeam.league_id == league_id
             )
         )
     )
     team = result.first()
+    if league_id == 276 : print(f'---------{team_name} - {team}')
     if team:
         return team[0]
     
-    # Try exact match on team_alias.alias
+    # Try match on TeamAlias.alias
     result = await db_session.execute(
         select(TeamAlias.team_id)
         .join(LeagueTeam, LeagueTeam.team_id == TeamAlias.team_id)
         .where(
             and_(
-                TeamAlias.alias == team_name,
+                # Trim and Upper the DB column here as well
+                func.upper(func.trim(TeamAlias.alias)) == clean_name,
                 LeagueTeam.league_id == league_id
             )
         )
     )
     alias = result.first()
+    if league_id == 276 : print(f'---------{team_name} - {alias}')
     if alias:
         return alias[0]
     
@@ -335,12 +343,14 @@ async def fetch_sofascore_range(start_date: str, end_date: str):
                     home_score = ev.get("homeScore", {}).get("normaltime")
                     away_score = ev.get("awayScore", {}).get("normaltime")
                     
-                    if home_score is None or away_score is None:
-                        date_skipped_count += 1
-                        continue
+                    # if home_score is None or away_score is None:
+                    #     date_skipped_count += 1
+                    #     continue
 
                     if 'INT' in country_code:
                         country = "International"
+                    
+                    country = country.replace('Amateur', '').strip()
                     
                     match_obj = SofascoreFt(
                         sofascore_id=sofascore_id,
@@ -349,13 +359,14 @@ async def fetch_sofascore_range(start_date: str, end_date: str):
                         country=country,
                         country_code=country_code,
                         home_team=ev.get("homeTeam", {}).get("name"),
-                        home_score=int(home_score),
+                        home_score=int(home_score) if home_score is not None else None,
                         away_team=ev.get("awayTeam", {}).get("name"),
-                        away_score=int(away_score),
+                        away_score=int(away_score) if away_score is not None else None,
                         start_time=start_time.replace(tzinfo=None),
                         league_id=None,
                         home_team_id=None,
-                        away_team_id=None
+                        away_team_id=None,
+                        event_status= ev.get("status", {}).get("type")
                     )
                     
                     date_match_objects.append(match_obj)

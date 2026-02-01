@@ -183,6 +183,7 @@ class League(Base):
     name = Column(Text, nullable=False) 
     country = Column(Text, nullable=False) 
     country_code = Column(Text, nullable=True) 
+    excluded = Column(Boolean, nullable=True, default=False)
 
 class TeamAlias(Base):
     __tablename__ = 'team_alias'
@@ -204,11 +205,12 @@ class SofascoreFt(Base):
     country = Column(Text, nullable=False)
     country_code = Column(Text, nullable=False)
     home_team = Column(Text, nullable=False)
-    home_score = Column(Integer, nullable=False)
+    home_score = Column(Integer, nullable=True)
     away_team = Column(Text, nullable=False)
-    away_score = Column(Integer, nullable=False)
+    away_score = Column(Integer, nullable=True)
     start_time = Column(DateTime, nullable=False)
     home_team_id = Column(Integer, nullable=True)
     away_team_id = Column(Integer, nullable=True)
     league_id = Column(Integer, nullable=True)
     match_id = Column(Integer, nullable=True)
+    event_status = Column(Text, nullable=True)
