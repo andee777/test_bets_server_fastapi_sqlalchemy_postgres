@@ -149,18 +149,21 @@ async def find_match_id(db_session, league_id: int, home_team_id: int, away_team
         - EndedMatch.start_time is stored in Kenyan Time (UTC+3)
         - We convert UTC to Kenyan Time for comparison with EndedMatch
     """
+    from sqlalchemy.orm import aliased
+
     try:
-        # Convert UTC time to Kenyan Time (UTC+3) for comparison with EndedMatch
+        # --- 1. PREPARATION ---
+        # Convert UTC time to Kenyan Time (UTC+3)
         kenya_offset = timedelta(hours=3)
         start_time_kenyan = start_time_utc + kenya_offset
         
-        # Create aliases for home and away team joins
-        from sqlalchemy.orm import aliased
+        # Define aliases
         HomeTeam = aliased(Team)
         AwayTeam = aliased(Team)
-        
-        # Query EndedMatch joined with League and Team tables
-        result = await db_session.execute(
+
+        # Build the "Base Query" containing all common joins and ID checks
+        # We do not add the time filter yet.
+        base_query = (
             select(EndedMatch.match_id)
             .join(League, EndedMatch.competition_name == League.name)
             .join(HomeTeam, EndedMatch.home_team == HomeTeam.name)
@@ -169,24 +172,47 @@ async def find_match_id(db_session, league_id: int, home_team_id: int, away_team
                 and_(
                     League.league_id == league_id,
                     HomeTeam.team_id == home_team_id,
-                    AwayTeam.team_id == away_team_id,
-                    EndedMatch.start_time == start_time_kenyan
+                    AwayTeam.team_id == away_team_id
                 )
             )
         )
+
+        # --- 2. ATTEMPT 1: EXACT MATCH ---
+        # Clone the base query and add the exact time filter
+        exact_query = base_query.where(EndedMatch.start_time == start_time_kenyan)
         
+        result = await db_session.execute(exact_query)
         match_row = result.first()
-        
+
         if match_row:
-            logger.debug(f"Found match_id {match_row[0]} for league_id={league_id}, home_team_id={home_team_id}, away_team_id={away_team_id}, start_time={start_time_kenyan} (Kenyan)")
+            # logger.debug(f"Found EXACT match_id {match_row[0]} at {start_time_kenyan}")
             return match_row[0]
-        
+
+        # --- 3. ATTEMPT 2: RANGE MATCH (+/- 15 mins) ---
+        logger.debug("Exact match not found. Searching +/- 15 minute range...")
+
+        time_buffer = timedelta(minutes=15)
+        min_start_time = start_time_kenyan - time_buffer
+        max_start_time = start_time_kenyan + time_buffer
+
+        # Clone the base query and add the range filter
+        range_query = base_query.where(
+            EndedMatch.start_time.between(min_start_time, max_start_time)
+        )
+
+        result = await db_session.execute(range_query)
+        match_row = result.first()
+
+        if match_row:
+            logger.debug(f"Found FUZZY match_id {match_row[0]} between {min_start_time} and {max_start_time}")
+            return match_row[0]
+
+        # --- 4. NO MATCH FOUND ---
         return None
-        
+
     except Exception as e:
         logger.error(f"Error finding match_id: {e}")
         return None
-
 
 # --- Helper: SofaScore API ---
 
@@ -264,8 +290,8 @@ async def fetch_events_for_category_date(session: CurlSession, category_id: int,
     }
     
     try:
-        # Add random delay between requests (0-0.5 seconds)
-        await asyncio.sleep((hash(f"{category_id}{date_str}") % 50) / 100)
+        # Add random delay between requests (0.1 - 0.6 seconds)
+        await asyncio.sleep(0.1 + (hash(f"{category_id}{date_str}") % 50) / 100)
         
         resp = await session.get(url, headers=headers, impersonate="chrome")
         
@@ -398,8 +424,27 @@ async def fetch_sofascore_range(start_date: str, end_date: str):
                     continue
 
                 try:
-                    home_score = ev.get("homeScore", {}).get("normaltime")
-                    away_score = ev.get("awayScore", {}).get("normaltime")
+                    # 1. Fetch score objects
+                    home_score_obj = ev.get("homeScore", {})
+                    away_score_obj = ev.get("awayScore", {})
+
+                    # 2. Extract specific score values
+                    home_score_normal_time = home_score_obj.get("normaltime")
+                    away_score_normal_time = away_score_obj.get("normaltime")
+
+                    # 3. Logic for Scores
+                    home_score = home_score_normal_time if home_score_normal_time is not None else home_score_obj.get("display")
+                    away_score = away_score_normal_time if away_score_normal_time is not None else away_score_obj.get("display")
+
+                    # 4. Logic for Event Status
+                    # Default to the type (e.g., 'finished')
+                    event_status = ev.get("status", {}).get("type")
+
+                    # If normaltime is missing, check for specific descriptions
+                    if home_score_normal_time is None or away_score_normal_time is None:
+                        description = ev.get("status", {}).get("description")
+                        if description in ["AET", "AP"]:
+                            event_status = description
                     
                     # if home_score is None or away_score is None:
                     #     date_skipped_count += 1
@@ -425,7 +470,7 @@ async def fetch_sofascore_range(start_date: str, end_date: str):
                         home_team_id=None,
                         away_team_id=None,
                         match_id=None,
-                        event_status= ev.get("status", {}).get("type")
+                        event_status= event_status
                     )
                     
                     date_match_objects.append(match_obj)
