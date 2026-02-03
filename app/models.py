@@ -176,6 +176,7 @@ class Team(Base):
     __tablename__ = 'team'
     team_id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(Text, nullable=False, index=True)
+    country_code = Column(Text, nullable=True) 
 
 class League(Base):
     __tablename__ = 'league'

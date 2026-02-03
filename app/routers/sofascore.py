@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import select, and_, distinct, func
+from sqlalchemy import select, and_, distinct, func, update
 from curl_cffi.requests import AsyncSession as CurlSession
 
 from app.database import async_session
@@ -107,7 +107,7 @@ async def find_team_id(db_session, team_name: str, league_id: int):
         )
     )
     team = result.first()
-    if league_id == 276 : print(f'---------{team_name} - {team}')
+    # if league_id == 276 : print(f'---------{team_name} - {team}')
     if team:
         return team[0]
     
@@ -124,7 +124,7 @@ async def find_team_id(db_session, team_name: str, league_id: int):
         )
     )
     alias = result.first()
-    if league_id == 276 : print(f'---------{team_name} - {alias}')
+    # if league_id == 276 : print(f'---------{team_name} - {alias}')
     if alias:
         return alias[0]
     
@@ -871,3 +871,130 @@ async def fetch_sofascore_range(start_date: str, end_date: str):
             "teams_missing": total_home_team_not_found + total_away_team_not_found
         }
     }
+
+
+@router.get("/reprocess-matches")
+async def reprocess_sofascore_matches(start_date: str = None, end_date: str = None):
+    """
+    Resets ID columns (league_id, team_ids, match_id) to NULL for the specified date range 
+    (or all dates if none provided), then attempts to re-match them using the latest 
+    Database aliases and logic.
+    """
+    
+    # 1. Validate Dates if provided
+    start_dt, end_dt = None, None
+    if start_date:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid start_date format. Use YYYY-MM-DD")
+    
+    if end_date:
+        try:
+            # Set end date to the end of that day
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid end_date format. Use YYYY-MM-DD")
+
+    async with async_session() as db_session:
+        try:
+            # --- STEP 1: RESET COLUMNS TO NULL ---
+            logger.info("Starting rematch: Resetting IDs to NULL...")
+            
+            # Build the reset query
+            reset_query = update(SofascoreFt).values(
+                league_id=None,
+                home_team_id=None,
+                away_team_id=None,
+                match_id=None
+            )
+            
+            # Build the selection query for reprocessing
+            select_query = select(SofascoreFt)
+
+            # Apply filters if dates are provided
+            if start_dt:
+                reset_query = reset_query.where(SofascoreFt.start_time >= start_dt)
+                select_query = select_query.where(SofascoreFt.start_time >= start_dt)
+            if end_dt:
+                reset_query = reset_query.where(SofascoreFt.start_time < end_dt)
+                select_query = select_query.where(SofascoreFt.start_time < end_dt)
+
+            # Execute Reset
+            await db_session.execute(reset_query)
+            # Flush changes so the next select sees NULLs (though we are iterating objects anyway)
+            await db_session.commit() 
+            
+            # --- STEP 2: RE-MATCH ---
+            logger.info("Reset complete. Starting re-matching process...")
+            
+            # Fetch the rows to process
+            result = await db_session.execute(select_query)
+            matches_to_process = result.scalars().all()
+            
+            total_processed = len(matches_to_process)
+            stats = {
+                "leagues_found": 0,
+                "teams_found": 0,
+                "matches_found": 0
+            }
+            i = 0
+            for match in matches_to_process:
+                i += 1
+                if i % 1000 == 0 : print(f'---------currently at: {i} out of {len(matches_to_process)}')
+                # 1. Find League
+                league_id = await find_league_id(db_session, match.competition_name, match.country_code)
+                
+                if league_id:
+                    match.league_id = league_id
+                    stats["leagues_found"] += 1
+                    
+                    # 2. Find Teams (Only if league is found)
+                    # Note: We pass match.league_id which is now set
+                    home_team_id = await find_team_id(db_session, match.home_team, league_id)
+                    away_team_id = await find_team_id(db_session, match.away_team, league_id)
+                    
+                    if home_team_id:
+                        match.home_team_id = home_team_id
+                    
+                    if away_team_id:
+                        match.away_team_id = away_team_id
+                        
+                    if home_team_id and away_team_id:
+                        stats["teams_found"] += 1
+                        
+                        # 3. Find Match ID (Only if league and both teams are found)
+                        # match.start_time in DB is naive UTC (as per fetch logic), 
+                        # which matches find_match_id expectation.
+                        match_id = await find_match_id(
+                            db_session,
+                            league_id,
+                            home_team_id,
+                            away_team_id,
+                            match.start_time
+                        )
+                        
+                        if match_id:
+                            match.match_id = match_id
+                            stats["matches_found"] += 1
+
+            # Commit all updates
+            await db_session.commit()
+            
+            logger.info(f"Rematch complete. Processed {total_processed} matches. Stats: {stats}")
+            
+            return {
+                "status": "success",
+                "message": "Matches reprocessed successfully",
+                "filters": {
+                    "start_date": start_date,
+                    "end_date": end_date
+                },
+                "total_processed": total_processed,
+                "results": stats
+            }
+
+        except Exception as e:
+            await db_session.rollback()
+            logger.error(f"Error during rematch process: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
