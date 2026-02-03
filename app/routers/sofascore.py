@@ -313,7 +313,279 @@ async def fetch_events_for_category_date(session: CurlSession, category_id: int,
         return []
 
 
-# --- Main Route ---
+# --- Main Routes ---
+
+@router.get("/fetch-by-country")
+async def fetch_sofascore_by_country(country_code: str, start_date: str, end_date: str):
+    """
+    Fetch SofaScore matches for a specific country code and date range.
+    
+    Args:
+        country_code: 2-letter country code (e.g., 'GB', 'ES') or 'INT' for international
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+    
+    Returns:
+        Summary of matches fetched and inserted
+    
+    Example usage:
+        /sofascore/fetch-by-country?country_code=GB&start_date=2024-01-01&end_date=2024-01-07
+    """
+    # Parse and validate dates
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Use YYYY-MM-DD format for dates")
+
+    # Validate and normalize country code
+    country_code = country_code.upper().strip()
+    if len(country_code) not in [2, 3]:
+        raise HTTPException(
+            status_code=400, 
+            detail="Country code must be 2 or 3 characters (e.g., 'GB', 'ES', 'INT')"
+        )
+
+    # Build date list
+    date_list = []
+    curr = start
+    while curr <= end:
+        date_list.append(curr.strftime("%Y-%m-%d"))
+        curr += timedelta(days=1)
+
+    # Initialize metrics
+    total_matches_fetched = 0
+    total_matches_inserted = 0
+    total_duplicate_count = 0
+    total_league_not_found = 0
+    total_home_team_not_found = 0
+    total_away_team_not_found = 0
+    total_fully_matched = 0
+    total_match_id_found = 0
+    
+    global_seen_sofascore_ids = set()
+
+    async with CurlSession() as s:
+        # Get SofaScore category IDs for this country (once for all dates)
+        target_category_ids = await fetch_sofascore_category_map(s, {country_code})
+        
+        if not target_category_ids:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Could not find SofaScore category for country code '{country_code}'. "
+                       f"This country may not be available in SofaScore's database."
+            )
+        
+        logger.info(f"Found {len(target_category_ids)} category ID(s) for country '{country_code}'")
+        
+        # Process each date
+        for d_str in date_list:
+            logger.info(f"Processing {d_str} for country {country_code}")
+            
+            # Parse target date
+            try:
+                target_date = datetime.strptime(d_str, "%Y-%m-%d").date()
+            except ValueError:
+                logger.error(f"Invalid date format: {d_str}")
+                continue
+            
+            start_of_day = datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc)
+            end_of_day = start_of_day.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+            # Fetch events for this date
+            day_events_flat = []
+            for cat_id in target_category_ids:
+                events = await fetch_events_for_category_date(s, cat_id, d_str)
+                day_events_flat.extend(events)
+            
+            logger.info(f"  -> Found {len(day_events_flat)} events for {d_str}")
+            
+            # Process events
+            date_match_objects = []
+            date_seen_ids = set()
+            date_duplicate_count = 0
+
+            for ev in day_events_flat:
+                sofascore_id = ev.get("id")
+                
+                # Validate timestamp
+                start_ts = ev.get("startTimestamp")
+                if not isinstance(start_ts, (int, float)) or start_ts <= 0:
+                    continue
+                    
+                start_time = datetime.fromtimestamp(start_ts, tz=timezone.utc)
+                
+                # Filter by date
+                if not (start_of_day <= start_time <= end_of_day):
+                    continue
+
+                # Check for duplicates
+                if sofascore_id in date_seen_ids or sofascore_id in global_seen_sofascore_ids:
+                    date_duplicate_count += 1
+                    continue
+
+                try:
+                    # Extract match details
+                    country = ev.get("tournament", {}).get("category", {}).get("name")
+                    ev_country_code = ev.get("tournament", {}).get("category", {}).get("alpha2") or "INT"
+                    
+                    home_score_obj = ev.get("homeScore", {})
+                    away_score_obj = ev.get("awayScore", {})
+                    home_score_normal_time = home_score_obj.get("normaltime")
+                    away_score_normal_time = away_score_obj.get("normaltime")
+                    
+                    home_score = home_score_normal_time if home_score_normal_time is not None else home_score_obj.get("display")
+                    away_score = away_score_normal_time if away_score_normal_time is not None else away_score_obj.get("display")
+                    
+                    event_status = ev.get("status", {}).get("type")
+                    if home_score_normal_time is None or away_score_normal_time is None:
+                        description = ev.get("status", {}).get("description")
+                        if description in ["AET", "AP"]:
+                            event_status = description
+                    
+                    if 'INT' in ev_country_code:
+                        country = "International"
+                    country = country.replace('Amateur', '').strip()
+                    
+                    match_obj = SofascoreFt(
+                        sofascore_id=sofascore_id,
+                        competition_name=ev.get("tournament", {}).get("name"),
+                        category=ev.get("tournament", {}).get("category", {}).get("sport", {}).get("name"),
+                        country=country,
+                        country_code=ev_country_code,
+                        home_team=ev.get("homeTeam", {}).get("name"),
+                        home_score=int(home_score) if home_score is not None else None,
+                        away_team=ev.get("awayTeam", {}).get("name"),
+                        away_score=int(away_score) if away_score is not None else None,
+                        start_time=start_time.replace(tzinfo=None),
+                        league_id=None,
+                        home_team_id=None,
+                        away_team_id=None,
+                        match_id=None,
+                        event_status=event_status
+                    )
+                    
+                    date_match_objects.append(match_obj)
+                    date_seen_ids.add(sofascore_id)
+                    
+                except Exception as e:
+                    logger.error(f"Error parsing event {sofascore_id}: {e}")
+                    continue
+            
+            logger.info(f"  -> Parsed {len(date_match_objects)} unique matches for {d_str}")
+            total_duplicate_count += date_duplicate_count
+            
+            # Insert into database
+            if date_match_objects:
+                async with async_session() as db_session:
+                    try:
+                        # Check for existing records
+                        existing_ids_result = await db_session.execute(
+                            select(SofascoreFt.sofascore_id).where(
+                                SofascoreFt.sofascore_id.in_(date_seen_ids)
+                            )
+                        )
+                        existing_ids = {row[0] for row in existing_ids_result.fetchall()}
+                        
+                        matches_to_insert = []
+                        date_db_duplicate_count = 0
+                        date_league_not_found = 0
+                        date_home_team_not_found = 0
+                        date_away_team_not_found = 0
+                        date_fully_matched = 0
+                        date_match_id_found = 0
+                        
+                        for match in date_match_objects:
+                            if match.sofascore_id in existing_ids:
+                                date_db_duplicate_count += 1
+                                continue
+                            
+                            # Try to map league
+                            league_id = await find_league_id(db_session, match.competition_name, match.country_code)
+                            
+                            if league_id is None:
+                                date_league_not_found += 1
+                                matches_to_insert.append(match)
+                                continue
+                            
+                            match.league_id = league_id
+                            
+                            # Try to map teams
+                            home_team_id = await find_team_id(db_session, match.home_team, league_id)
+                            if home_team_id:
+                                match.home_team_id = home_team_id
+                            else:
+                                date_home_team_not_found += 1
+                            
+                            away_team_id = await find_team_id(db_session, match.away_team, league_id)
+                            if away_team_id:
+                                match.away_team_id = away_team_id
+                            else:
+                                date_away_team_not_found += 1
+                            
+                            # Try to find match_id if fully matched
+                            if match.league_id and match.home_team_id and match.away_team_id:
+                                date_fully_matched += 1
+                                
+                                match_id = await find_match_id(
+                                    db_session,
+                                    match.league_id,
+                                    match.home_team_id,
+                                    match.away_team_id,
+                                    match.start_time
+                                )
+                                
+                                if match_id:
+                                    match.match_id = match_id
+                                    date_match_id_found += 1
+                            
+                            matches_to_insert.append(match)
+                        
+                        if matches_to_insert:
+                            db_session.add_all(matches_to_insert)
+                            await db_session.commit()
+                            logger.info(f"  -> Inserted {len(matches_to_insert)} matches for {d_str}")
+                            
+                            global_seen_sofascore_ids.update(date_seen_ids)
+                            
+                            total_matches_inserted += len(matches_to_insert)
+                            total_duplicate_count += date_db_duplicate_count
+                            total_league_not_found += date_league_not_found
+                            total_home_team_not_found += date_home_team_not_found
+                            total_away_team_not_found += date_away_team_not_found
+                            total_fully_matched += date_fully_matched
+                            total_match_id_found += date_match_id_found
+                        else:
+                            logger.info(f"  -> No new matches to insert for {d_str}")
+                            total_duplicate_count += date_db_duplicate_count
+
+                    except Exception as e:
+                        await db_session.rollback()
+                        logger.error(f"DB error for {d_str}: {e}")
+                        continue
+            else:
+                logger.info(f"  -> No matches to process for {d_str}")
+            
+            total_matches_fetched += len(date_match_objects)
+
+    logger.info(f"Complete: {country_code} - Fetched: {total_matches_fetched}, Inserted: {total_matches_inserted}")
+    
+    return {
+        "status": "success",
+        "country_code": country_code,
+        "date_range": f"{start_date} to {end_date}",
+        "dates_processed": len(date_list),
+        "matches_fetched": total_matches_fetched,
+        "matches_inserted": total_matches_inserted,
+        "stats": {
+            "duplicates_skipped": total_duplicate_count,
+            "fully_matched": total_fully_matched,
+            "match_ids_found": total_match_id_found,
+            "league_missing": total_league_not_found,
+            "teams_missing": total_home_team_not_found + total_away_team_not_found
+        }
+    }
+
 
 @router.get("/fetch-range")
 async def fetch_sofascore_range(start_date: str, end_date: str):
