@@ -215,3 +215,21 @@ class SofascoreFt(Base):
     league_id = Column(Integer, nullable=True)
     match_id = Column(Text, nullable=True)
     event_status = Column(Text, nullable=True)
+
+class SofascoreLive(Base):
+    __tablename__ = 'sofascore_live'
+    sofascore_id = Column(Integer, nullable=False, primary_key=True)
+    competition_name = Column(Text, nullable=False)
+    category = Column(Text, nullable=True)
+    country = Column(Text, nullable=False)
+    country_code = Column(Text, nullable=False)
+    home_team = Column(Text, nullable=False)
+    home_score = Column(Integer, nullable=True)
+    away_team = Column(Text, nullable=False)
+    away_score = Column(Integer, nullable=True)
+    start_time = Column(DateTime, nullable=False)
+    home_team_id = Column(Integer, nullable=True)
+    away_team_id = Column(Integer, nullable=True)
+    league_id = Column(Integer, nullable=True)
+    match_id = Column(Text, nullable=True)
+    event_status = Column(Text, nullable=True)

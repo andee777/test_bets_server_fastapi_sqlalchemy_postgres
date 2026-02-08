@@ -16,6 +16,25 @@ async def upsert_matches(session: AsyncSession, matches: list, category: str):
     match_data_list = []
     for match in matches:
         match_id = match.get("match_id")
+        # 1. Define your mapping dictionary at the top of your script or function
+        country_map = {
+            "International Clubs": "International",
+            "International Youth": "International",
+            "Hong Kong, China": "Hong Kong",
+            # "Zanzibar": "Tanzania"
+        }
+
+        # 2. Get the raw category name, strip 'Amateur' and whitespace
+        raw_country = str(match.get("category", "")).replace('Amateur', '').strip()
+
+        # 3. Apply the mapping logic
+        # This checks the mapping first; if not found, it keeps the original cleaned name
+        final_country = country_map.get(raw_country, raw_country)
+
+        # Use final_country in your object creation
+        # "country": final_country,
+
+
         if not match_id:
             continue
 
@@ -24,7 +43,7 @@ async def upsert_matches(session: AsyncSession, matches: list, category: str):
             "match_id": str(match_id),
             "competition_name": match.get("competition_name"),
             "category": category,
-            "country": str(match.get("category")).replace('Amateur', '').strip(),
+            "country": final_country,
             "event_status": match.get("event_status"),
             "live": True,
             "home_team": match.get("home_team").strip(),

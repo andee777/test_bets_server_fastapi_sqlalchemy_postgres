@@ -941,7 +941,7 @@ async def reprocess_sofascore_matches(start_date: str = None, end_date: str = No
             i = 0
             for match in matches_to_process:
                 i += 1
-                if i % 1000 == 0 : print(f'---------currently at: {i} out of {len(matches_to_process)}')
+                if i % 5000 == 0 : print(f'---------currently at: {i} out of {len(matches_to_process)}')
                 # 1. Find League
                 league_id = await find_league_id(db_session, match.competition_name, match.country_code)
                 
