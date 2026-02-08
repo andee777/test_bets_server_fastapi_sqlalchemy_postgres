@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import select, and_, distinct, func, update
+from sqlalchemy import select, and_, distinct, func, update, delete
 from curl_cffi.requests import AsyncSession as CurlSession
 
 from app.database import async_session
@@ -615,6 +615,7 @@ async def fetch_sofascore_today():
     matches_live_inserted = 0
     matches_ft_inserted = 0
     matches_notstarted_skipped = 0
+    matches_moved_from_live = 0
     duplicate_count = 0
     league_not_found = 0
     home_team_not_found = 0
@@ -780,6 +781,29 @@ async def fetch_sofascore_today():
         # Insert into database
         async with async_session() as db_session:
             try:
+                # First, handle status transitions: check if any finished/other matches exist in sofascore_live
+                # and need to be moved to sofascore_ft
+                matches_moved_from_live = 0
+                if ft_match_objects:
+                    ft_ids = {m.sofascore_id for m in ft_match_objects}
+                    
+                    # Find matches that are in sofascore_live but now have finished/other status
+                    existing_in_live_result = await db_session.execute(
+                        select(SofascoreLive.sofascore_id).where(
+                            SofascoreLive.sofascore_id.in_(ft_ids)
+                        )
+                    )
+                    live_ids_to_remove = {row[0] for row in existing_in_live_result.fetchall()}
+                    
+                    if live_ids_to_remove:
+                        # Delete from sofascore_live
+                        delete_stmt = delete(SofascoreLive).where(
+                            SofascoreLive.sofascore_id.in_(live_ids_to_remove)
+                        )
+                        await db_session.execute(delete_stmt)
+                        matches_moved_from_live = len(live_ids_to_remove)
+                        logger.info(f"Removed {matches_moved_from_live} matches from sofascore_live (status changed)")
+                
                 # Process LIVE matches
                 if live_match_objects:
                     live_ids = {m.sofascore_id for m in live_match_objects}
@@ -901,7 +925,7 @@ async def fetch_sofascore_today():
                 logger.error(f"DB error: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
     
-    logger.info(f"Fetch complete for {date_str}: Live={matches_live_inserted}, FT={matches_ft_inserted}")
+    logger.info(f"Fetch complete for {date_str}: Live={matches_live_inserted}, FT={matches_ft_inserted}, Moved from Live={matches_moved_from_live}")
     
     return {
         "status": "success",
@@ -910,6 +934,7 @@ async def fetch_sofascore_today():
         "matches_live_inserted": matches_live_inserted,
         "matches_ft_inserted": matches_ft_inserted,
         "matches_notstarted_skipped": matches_notstarted_skipped,
+        "matches_moved_from_live_to_ft": matches_moved_from_live,
         "stats": {
             "duplicates_skipped": duplicate_count,
             "fully_matched": fully_matched,
