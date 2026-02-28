@@ -2,12 +2,12 @@ import logging
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from fastapi import HTTPException
-from sqlalchemy import select, and_, distinct
+from fastapi import APIRouter, HTTPException
+from sqlalchemy import select, and_, distinct, func, update, delete
 from curl_cffi.requests import AsyncSession as CurlSession
 
 from app.database import async_session
-from app.models import SofascoreFt, League, LeagueAlias, Team, TeamAlias, LeagueTeam, EndedMatch
+from app.models import SofascoreFt, SofascoreLive, League, LeagueAlias, Team, TeamAlias, LeagueTeam, EndedMatch, Match
 
 # Configure logging for this module
 logger = logging.getLogger(__name__)
@@ -53,6 +53,30 @@ async def get_relevant_country_codes_for_date(db_session, date_str: str):
     except ValueError:
         logger.error(f"Invalid date format in get_relevant_country_codes_for_date: {date_str}")
         return set()
+    
+async def get_relevant_country_codes_live(db_session):
+    """
+    Queries the database to find all unique country codes associated with 
+    leagues present in the ended_matches table for a SINGLE date.
+    
+    Timezone Logic:
+    - Input date is UTC.
+    - DB EndedMatch.start_time is Kenyan Time (UTC+3).
+    - We convert the UTC date to Kenyan Time limits to query the DB efficiently.
+    """
+    try:
+       
+        logger.info(f"Filtering Live Matches for country codes")
+
+        result = await db_session.execute(
+            select(distinct(League.country_code))
+            .join(Match, and_(Match.competition_name == League.name, Match.country == League.country))
+        )
+        return {row[0] for row in result.fetchall()}
+        
+    except ValueError:
+        logger.error(f"Error in get_relevant_country_codes_live")
+        return set()
 
 async def find_league_id(db_session, league_name: str, country_code: str):
     """Find league_id by exact match on league name or league alias."""
@@ -84,39 +108,134 @@ async def find_league_id(db_session, league_name: str, country_code: str):
     return None
 
 async def find_team_id(db_session, team_name: str, league_id: int):
-    """Find team_id by exact match on name or alias within a league."""
-    # First try exact match on team.name
+    """Find team_id by exact match on name or alias within a league (case-insensitive & trimmed)."""
+    
+    # 1. Pre-process the input name (Trim whitespace and convert to Uppercase)
+    clean_name = team_name.strip().upper()
+
+    # First try match on Team.name
     result = await db_session.execute(
         select(Team.team_id)
         .join(LeagueTeam, LeagueTeam.team_id == Team.team_id)
         .where(
             and_(
-                Team.name == team_name,
+                # Trim and Upper the DB column to match the cleaned input
+                func.upper(func.trim(Team.name)) == clean_name,
                 LeagueTeam.league_id == league_id
             )
         )
     )
     team = result.first()
+    # if league_id == 276 : print(f'---------{team_name} - {team}')
     if team:
         return team[0]
     
-    # Try exact match on team_alias.alias
+    # Try match on TeamAlias.alias
     result = await db_session.execute(
         select(TeamAlias.team_id)
         .join(LeagueTeam, LeagueTeam.team_id == TeamAlias.team_id)
         .where(
             and_(
-                TeamAlias.alias == team_name,
+                # Trim and Upper the DB column here as well
+                func.upper(func.trim(TeamAlias.alias)) == clean_name,
                 LeagueTeam.league_id == league_id
             )
         )
     )
     alias = result.first()
+    # if league_id == 276 : print(f'---------{team_name} - {alias}')
     if alias:
         return alias[0]
     
     return None
 
+async def find_match_id(db_session, league_id: int, home_team_id: int, away_team_id: int, start_time_utc: datetime):
+    """
+    Find match_id from EndedMatch table by joining with League and Team tables.
+    
+    Args:
+        db_session: Database session
+        league_id: ID from League table
+        home_team_id: ID from Team table for home team
+        away_team_id: ID from Team table for away team
+        start_time_utc: Start time in UTC (from SofaScore)
+    
+    Returns:
+        match_id if found, None otherwise
+    
+    Timezone Logic:
+        - Input start_time_utc is in UTC (from SofaScore API)
+        - EndedMatch.start_time is stored in Kenyan Time (UTC+3)
+        - We convert UTC to Kenyan Time for comparison with EndedMatch
+    """
+    from sqlalchemy.orm import aliased
+
+    try:
+        logger.info(f"####### looking for match_id - home: {home_team_id}, away: {away_team_id}, league: {league_id}")
+
+        # --- 1. PREPARATION ---
+        # Convert UTC time to Kenyan Time (UTC+3)
+        kenya_offset = timedelta(hours=3)
+        start_time_kenyan = start_time_utc + kenya_offset
+        
+        # Define aliases
+        HomeTeam = aliased(Team)
+        AwayTeam = aliased(Team)
+
+        # Build the "Base Query" containing all common joins and ID checks
+        # We do not add the time filter yet.
+        base_query = (
+            select(Match.match_id)
+            .join(League, Match.competition_name == League.name)
+            .join(HomeTeam, Match.home_team == HomeTeam.name)
+            .join(AwayTeam, Match.away_team == AwayTeam.name)
+            .where(
+                and_(
+                    League.league_id == league_id,
+                    HomeTeam.team_id == home_team_id,
+                    AwayTeam.team_id == away_team_id
+                )
+            )
+        )
+
+        # --- 2. ATTEMPT 1: EXACT MATCH ---
+        # Clone the base query and add the exact time filter
+        # exact_query = base_query.where(Match.start_time == start_time_kenyan)
+        
+        # result = await db_session.execute(exact_query)
+        result = await db_session.execute(base_query)
+        match_row = result.first()
+        logger.info(f"result: {result}")
+
+        if match_row:
+            # logger.debug(f"Found EXACT match_id {match_row[0]} at {start_time_kenyan}")
+            return match_row[0]
+
+        # --- 3. ATTEMPT 2: RANGE MATCH (+/- 15 mins) ---
+        logger.debug("Exact match not found. Searching +/- 15 minute range...")
+
+        time_buffer = timedelta(minutes=15)
+        min_start_time = start_time_kenyan - time_buffer
+        max_start_time = start_time_kenyan + time_buffer
+
+        # Clone the base query and add the range filter
+        range_query = base_query.where(
+            Match.start_time.between(min_start_time, max_start_time)
+        )
+
+        result = await db_session.execute(range_query)
+        match_row = result.first()
+
+        if match_row:
+            logger.debug(f"Found FUZZY match_id {match_row[0]} between {min_start_time} and {max_start_time}")
+            return match_row[0]
+
+        # --- 4. NO MATCH FOUND ---
+        return None
+
+    except Exception as e:
+        logger.error(f"Error finding match_id: {e}")
+        return None
 
 # --- Helper: SofaScore API ---
 
@@ -194,8 +313,8 @@ async def fetch_events_for_category_date(session: CurlSession, category_id: int,
     }
     
     try:
-        # Add random delay between requests (0.5-2 seconds)
-        await asyncio.sleep(0.5 + (hash(f"{category_id}{date_str}") % 150) / 100)
+        # Add random delay between requests (0.1 - 0.6 seconds)
+        await asyncio.sleep(0.1 + (hash(f"{category_id}{date_str}") % 50) / 100)
         
         resp = await session.get(url, headers=headers, impersonate="chrome")
         
@@ -216,286 +335,406 @@ async def fetch_events_for_category_date(session: CurlSession, category_id: int,
         logger.error(f"Exception fetching cat {category_id} date {date_str}: {e}")
         return []
 
-
-async def fetch_sofascore_range(start_date: str, end_date: str):
+async def fetch_sofascore_today():
     """
-    1. Loop through each date in the range
-    2. For each date, get relevant country codes from DB
-    3. Get SofaScore category IDs for those countries
-    4. Fetch events for that date only
-    5. Save to DB
-    """
-    # 1. Parse Dates for Loop
-    try:
-        start = datetime.strptime(start_date, "%Y-%m-%d")
-        end = datetime.strptime(end_date, "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Use YYYY-MM-DD format")
-
-    date_list = []
-    curr = start
-    while curr <= end:
-        date_list.append(curr.strftime("%Y-%m-%d"))
-        curr += timedelta(days=1)
-
-    # Global metrics across all dates
-    total_matches_fetched = 0
-    total_matches_inserted = 0
-    total_categories_fetched = 0
-    dates_with_no_matches = 0
-    total_duplicate_count = 0
-    total_skipped_count = 0
-    total_league_not_found = 0
-    total_home_team_not_found = 0
-    total_away_team_not_found = 0
-    total_fully_matched = 0
+    Fetch SofaScore matches for today (UTC date).
     
-    # Track seen IDs across all dates to avoid duplicates
-    global_seen_sofascore_ids = set()
-
+    Routes matches based on event status:
+    - 'inprogress': Insert into sofascore_live table
+    - 'notstarted': Skip (ignore)
+    - All other statuses: Insert into sofascore_ft table
+    
+    Returns:
+        Summary of matches fetched and inserted by table
+    """
+    # Get current UTC date
+    today_utc = datetime.now(timezone.utc)
+    date_str = today_utc.strftime("%Y-%m-%d")
+    
+    logger.info(f"Fetching matches for today: {date_str} (UTC)")
+    
+    # Define start and end of day in UTC
+    start_of_day = datetime(today_utc.year, today_utc.month, today_utc.day, tzinfo=timezone.utc)
+    end_of_day = start_of_day.replace(hour=23, minute=59, second=59, microsecond=999999)
+    
+    # Initialize metrics
+    total_events_fetched = 0
+    matches_live_inserted = 0
+    matches_ft_inserted = 0
+    matches_notstarted_skipped = 0
+    matches_moved_from_live = 0
+    duplicate_count = 0
+    league_not_found = 0
+    home_team_not_found = 0
+    away_team_not_found = 0
+    fully_matched = 0
+    match_id_found = 0
+    
     async with CurlSession() as s:
-        # Process each date separately
-        for d_str in date_list:
-            logger.info(f"Processing date: {d_str}")
-            
-            # Get country codes specific to this date
-            async with async_session() as db_session:
-                relevant_country_codes = await get_relevant_country_codes_for_date(db_session, d_str)
-            
-            if not relevant_country_codes:
-                logger.info(f"No ended matches found for {d_str}, skipping SofaScore fetch")
-                dates_with_no_matches += 1
-                continue
-            
-            logger.info(f"Found {len(relevant_country_codes)} country codes for {d_str}: {relevant_country_codes}")
-            
-            # Get SofaScore Category IDs for this date's countries
+
+        # Get country codes specific to this date
+        async with async_session() as db_session:
+            relevant_country_codes = await get_relevant_country_codes_live(db_session)
+
+        # Fetch all categories if no specific country codes found
+        # relevant_country_codes = set()  # Empty set will fetch all categories
+        
+        # Get SofaScore Category IDs
+        if relevant_country_codes:
             target_category_ids = await fetch_sofascore_category_map(s, relevant_country_codes)
+            logger.info(f"Found {len(target_category_ids)} category ID(s) for country codes: {relevant_country_codes}")
+        else:
+            # Fetch all categories
+            url = "https://www.sofascore.com/api/v1/sport/football/categories"
+            headers = {
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Referer': 'https://www.sofascore.com/',
+                'Origin': 'https://www.sofascore.com',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin',
+            }
+            response = await s.get(url, headers=headers, impersonate="chrome")
+            if response.status_code == 200:
+                data = response.json()
+                target_category_ids = [cat.get("id") for cat in data.get("categories", [])]
+                logger.info(f"Fetching all {len(target_category_ids)} categories")
+            else:
+                logger.error(f"Failed to fetch categories: {response.status_code}")
+                return {"status": "error", "message": "Failed to fetch categories"}
+        
+        if not target_category_ids:
+            return {
+                "status": "error",
+                "message": "No categories found to fetch",
+                "date": date_str
+            }
+        
+        # Fetch events for today
+        day_events_flat = []
+        for cat_id in target_category_ids:
+            events = await fetch_events_for_category_date(s, cat_id, date_str)
+            day_events_flat.extend(events)
+        
+        total_events_fetched = len(day_events_flat)
+        logger.info(f"Found {total_events_fetched} total events for {date_str}")
+        
+        # Separate events by status
+        live_match_objects = []
+        ft_match_objects = []
+        seen_ids = set()
+        
+        for ev in day_events_flat:
+            sofascore_id = ev.get("id")
             
-            if not target_category_ids:
-                logger.warning(f"Could not map country codes to SofaScore categories for {d_str}")
+            # Validate timestamp
+            start_ts = ev.get("startTimestamp")
+            if not isinstance(start_ts, (int, float)) or start_ts <= 0:
+                continue
+                
+            start_time = datetime.fromtimestamp(start_ts, tz=timezone.utc)
+            
+            # Filter by date
+            if not (start_of_day <= start_time <= end_of_day):
                 continue
             
-            total_categories_fetched += len(target_category_ids)
-            logger.info(f"Fetching {len(target_category_ids)} categories for {d_str}")
+            # Check for duplicates
+            if sofascore_id in seen_ids:
+                duplicate_count += 1
+                continue
             
-            # Parse the target date
+            # Get event status
+            event_status = ev.get("status", {}).get("type")
+            
+            # Skip 'notstarted' events
+            if event_status == "notstarted":
+                matches_notstarted_skipped += 1
+                continue
+            
             try:
-                target_date = datetime.strptime(d_str, "%Y-%m-%d").date()
-            except ValueError:
-                logger.error(f"Invalid date format: {d_str}")
-                continue
-            
-            start_of_day = datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc)
-            end_of_day = start_of_day.replace(hour=23, minute=59, second=59, microsecond=999999)
-
-            # Instead of concurrent requests, do sequential with rate limiting
-            day_events_flat = []
-            for cat_id in target_category_ids:
-                events = await fetch_events_for_category_date(s, cat_id, d_str)
-                day_events_flat.extend(events)
-            
-            logger.info(f"  -> Found {len(day_events_flat)} events for {d_str}")
-            
-            # Process events for this specific date
-            date_match_objects = []
-            date_seen_ids = set()
-            date_duplicate_count = 0
-            date_skipped_count = 0
-
-            for ev in day_events_flat:
-                sofascore_id = ev.get("id")
-                
-                start_ts = ev.get("startTimestamp")
-                if not isinstance(start_ts, (int, float)) or start_ts <= 0:
-                    continue
-                    
-                start_time = datetime.fromtimestamp(start_ts, tz=timezone.utc)
-                
-                if not (start_of_day <= start_time <= end_of_day):
-                    continue
-
+                # Extract match details
                 country = ev.get("tournament", {}).get("category", {}).get("name")
-                country_code = ev.get("tournament", {}).get("category", {}).get("alpha2") or "INT"
-
-                # Check against both date-specific and global seen IDs
-                if sofascore_id in date_seen_ids or sofascore_id in global_seen_sofascore_ids:
-                    date_duplicate_count += 1
-                    continue
-
-                try:
-                    home_score = ev.get("homeScore", {}).get("normaltime")
-                    away_score = ev.get("awayScore", {}).get("normaltime")
-                    
-                    if home_score is None or away_score is None:
-                        date_skipped_count += 1
-                        continue
-
-                    if 'INT' in country_code:
-                        country = "International"
-                    
+                ev_country_code = ev.get("tournament", {}).get("category", {}).get("alpha2") or "INT"
+                
+                home_score_obj = ev.get("homeScore", {})
+                away_score_obj = ev.get("awayScore", {})
+                home_score_normal_time = home_score_obj.get("normaltime")
+                away_score_normal_time = away_score_obj.get("normaltime")
+                
+                home_score = home_score_normal_time if home_score_normal_time is not None else home_score_obj.get("display")
+                away_score = away_score_normal_time if away_score_normal_time is not None else away_score_obj.get("display")
+                
+                # Update event_status if needed
+                if home_score_normal_time is None or away_score_normal_time is None:
+                    description = ev.get("status", {}).get("description")
+                    if description in ["AET", "AP"]:
+                        event_status = description
+                
+                if 'INT' in ev_country_code:
+                    country = "International"
+                country = country.replace('Amateur', '').strip()
+                
+                # Determine which table to use
+                if event_status == "inprogress":
+                    match_obj = SofascoreLive(
+                        sofascore_id=sofascore_id,
+                        competition_name=ev.get("tournament", {}).get("name"),
+                        category=ev.get("tournament", {}).get("category", {}).get("sport", {}).get("name"),
+                        country=country,
+                        country_code=ev_country_code,
+                        home_team=ev.get("homeTeam", {}).get("name"),
+                        home_score=int(home_score) if home_score is not None else None,
+                        away_team=ev.get("awayTeam", {}).get("name"),
+                        away_score=int(away_score) if away_score is not None else None,
+                        start_time=start_time.replace(tzinfo=None),
+                        league_id=None,
+                        home_team_id=None,
+                        away_team_id=None,
+                        match_id=None,
+                        event_status=event_status,
+                        match_time=None
+                    )
+                    live_match_objects.append(match_obj)
+                else:
                     match_obj = SofascoreFt(
                         sofascore_id=sofascore_id,
                         competition_name=ev.get("tournament", {}).get("name"),
                         category=ev.get("tournament", {}).get("category", {}).get("sport", {}).get("name"),
                         country=country,
-                        country_code=country_code,
+                        country_code=ev_country_code,
                         home_team=ev.get("homeTeam", {}).get("name"),
-                        home_score=int(home_score),
+                        home_score=int(home_score) if home_score is not None else None,
                         away_team=ev.get("awayTeam", {}).get("name"),
-                        away_score=int(away_score),
+                        away_score=int(away_score) if away_score is not None else None,
                         start_time=start_time.replace(tzinfo=None),
                         league_id=None,
                         home_team_id=None,
-                        away_team_id=None
+                        away_team_id=None,
+                        match_id=None,
+                        event_status=event_status
                     )
-                    
-                    date_match_objects.append(match_obj)
-                    date_seen_ids.add(sofascore_id)
-                except Exception as e:
-                    logger.error(f"Error parsing event {sofascore_id}: {e}")
-                    continue
-            
-            logger.info(f"  -> Parsed {len(date_match_objects)} unique matches for {d_str}")
-            
-            # Update global metrics
-            total_duplicate_count += date_duplicate_count
-            total_skipped_count += date_skipped_count
-            
-            # Insert this date's data into the database
-            if date_match_objects:
-                async with async_session() as db_session:
-                    try:
-                        # Check DB duplicates for this date's matches
-                        existing_ids_result = await db_session.execute(
-                            select(SofascoreFt.sofascore_id).where(
-                                SofascoreFt.sofascore_id.in_(date_seen_ids)
-                            )
-                        )
-                        existing_ids = {row[0] for row in existing_ids_result.fetchall()}
-                        
-                        matches_to_insert = []
-                        date_db_duplicate_count = 0
-                        date_league_not_found = 0
-                        date_home_team_not_found = 0
-                        date_away_team_not_found = 0
-                        date_fully_matched = 0
-                        
-                        for match in date_match_objects:
-                            if match.sofascore_id in existing_ids:
-                                date_db_duplicate_count += 1
-                                continue
-                            
-                            # Mapping Logic
-                            league_id = await find_league_id(db_session, match.competition_name, match.country_code)
-                            
-                            if league_id is None:
-                                date_league_not_found += 1
-                                matches_to_insert.append(match)
-                                continue
-                            
-                            match.league_id = league_id
-                            
-                            home_team_id = await find_team_id(db_session, match.home_team, league_id)
-                            if home_team_id:
-                                match.home_team_id = home_team_id
-                            else:
-                                date_home_team_not_found += 1
-                            
-                            away_team_id = await find_team_id(db_session, match.away_team, league_id)
-                            if away_team_id:
-                                match.away_team_id = away_team_id
-                            else:
-                                date_away_team_not_found += 1
-                            
-                            if match.league_id and match.home_team_id and match.away_team_id:
-                                date_fully_matched += 1
-                            
-                            matches_to_insert.append(match)
-                        
-                        if matches_to_insert:
-                            db_session.add_all(matches_to_insert)
-                            await db_session.commit()
-                            logger.info(f"  -> Inserted {len(matches_to_insert)} matches for {d_str} (duplicates: {date_db_duplicate_count})")
-                            
-                            # Add to global seen IDs after successful insertion
-                            global_seen_sofascore_ids.update(date_seen_ids)
-                            
-                            # Update global metrics
-                            total_matches_inserted += len(matches_to_insert)
-                            total_duplicate_count += date_db_duplicate_count
-                            total_league_not_found += date_league_not_found
-                            total_home_team_not_found += date_home_team_not_found
-                            total_away_team_not_found += date_away_team_not_found
-                            total_fully_matched += date_fully_matched
-                        else:
-                            logger.info(f"  -> No new matches to insert for {d_str} (all duplicates)")
-                            total_duplicate_count += date_db_duplicate_count
-
-                    except Exception as e:
-                        await db_session.rollback()
-                        logger.error(f"DB Transaction Error for {d_str}: {e}")
-                        # Continue to next date even if this one fails
-                        continue
-            else:
-                logger.info(f"  -> No matches to process for {d_str}")
-            
-            total_matches_fetched += len(date_match_objects)
-
-    logger.info(f"Data collection complete. Total matches fetched: {total_matches_fetched}, inserted: {total_matches_inserted}")
-    
-    # return {
-    #     "status": "success",
-    #     "date_range": f"{start_date} to {end_date}",
-    #     "dates_processed": len(date_list),
-    #     "dates_with_no_matches": dates_with_no_matches,
-    #     "total_categories_fetched": total_categories_fetched,
-    #     "matches_fetched": total_matches_fetched,
-    #     "matches_inserted": total_matches_inserted,
-    #     "stats": {
-    #         "duplicates_skipped": total_duplicate_count,
-    #         "fully_matched": total_fully_matched,
-    #         "league_missing": total_league_not_found,
-    #         "teams_missing": total_home_team_not_found + total_away_team_not_found
-    #     }
-    # }
+                    ft_match_objects.append(match_obj)
+                
+                seen_ids.add(sofascore_id)
+                
+            except Exception as e:
+                logger.error(f"Error parsing event {sofascore_id}: {e}")
+                continue
         
+        logger.info(f"Parsed {len(live_match_objects)} live matches and {len(ft_match_objects)} finished/other matches")
+        
+        # Insert into database
+        async with async_session() as db_session:
+            try:
+                # First, handle status transitions: check if any finished/other matches exist in sofascore_live
+                # and need to be moved to sofascore_ft
+                matches_moved_from_live = 0
+                if ft_match_objects:
+                    ft_ids = {m.sofascore_id for m in ft_match_objects}
+                    
+                    # Find matches that are in sofascore_live but now have finished/other status
+                    existing_in_live_result = await db_session.execute(
+                        select(SofascoreLive.sofascore_id).where(
+                            SofascoreLive.sofascore_id.in_(ft_ids)
+                        )
+                    )
+                    live_ids_to_remove = {row[0] for row in existing_in_live_result.fetchall()}
+                    
+                    if live_ids_to_remove:
+                        # Delete from sofascore_live
+                        delete_stmt = delete(SofascoreLive).where(
+                            SofascoreLive.sofascore_id.in_(live_ids_to_remove)
+                        )
+                        await db_session.execute(delete_stmt)
+                        matches_moved_from_live = len(live_ids_to_remove)
+                        logger.info(f"Removed {matches_moved_from_live} matches from sofascore_live (status changed)")
+                
+                # Process LIVE matches
+                if live_match_objects:
+                    live_ids = {m.sofascore_id for m in live_match_objects}
+                    existing_live_result = await db_session.execute(
+                        select(SofascoreLive.sofascore_id).where(
+                            SofascoreLive.sofascore_id.in_(live_ids)
+                        )
+                    )
+                    existing_live_ids = {row[0] for row in existing_live_result.fetchall()}
+                    
+                    live_to_insert = []
+                    for match in live_match_objects:
+                        if match.sofascore_id in existing_live_ids:
+                            duplicate_count += 1
+                            continue
+                        
+                        # Map league and teams
+                        league_id = await find_league_id(db_session, match.competition_name, match.country_code)
+                        if league_id is None:
+                            league_not_found += 1
+                            live_to_insert.append(match)
+                            continue
+                        
+                        match.league_id = league_id
+                        
+                        home_team_id = await find_team_id(db_session, match.home_team, league_id)
+                        if home_team_id:
+                            match.home_team_id = home_team_id
+                        else:
+                            home_team_not_found += 1
+                        
+                        away_team_id = await find_team_id(db_session, match.away_team, league_id)
+                        if away_team_id:
+                            match.away_team_id = away_team_id
+                        else:
+                            away_team_not_found += 1
+                        
+                        if match.league_id and match.home_team_id and match.away_team_id:
+                            fully_matched += 1
+                            match_id = await find_match_id(
+                                db_session,
+                                match.league_id,
+                                match.home_team_id,
+                                match.away_team_id,
+                                match.start_time
+                            )
+                            if match_id:
+                                match.match_id = match_id
+                                match_id_found += 1
+                        
+                        live_to_insert.append(match)
+                    
+                    if live_to_insert:
+                        db_session.add_all(live_to_insert)
+                        matches_live_inserted = len(live_to_insert)
+                        logger.info(f"Inserted {matches_live_inserted} matches into sofascore_live")
+                
+                # Process FT/other matches
+                if ft_match_objects:
+                    ft_ids = {m.sofascore_id for m in ft_match_objects}
+                    existing_ft_result = await db_session.execute(
+                        select(SofascoreFt.sofascore_id).where(
+                            SofascoreFt.sofascore_id.in_(ft_ids)
+                        )
+                    )
+                    existing_ft_ids = {row[0] for row in existing_ft_result.fetchall()}
+                    
+                    ft_to_insert = []
+                    for match in ft_match_objects:
+                        if match.sofascore_id in existing_ft_ids:
+                            duplicate_count += 1
+                            continue
+                        
+                        # Map league and teams
+                        league_id = await find_league_id(db_session, match.competition_name, match.country_code)
+                        if league_id is None:
+                            league_not_found += 1
+                            ft_to_insert.append(match)
+                            continue
+                        
+                        match.league_id = league_id
+                        
+                        home_team_id = await find_team_id(db_session, match.home_team, league_id)
+                        if home_team_id:
+                            match.home_team_id = home_team_id
+                        else:
+                            home_team_not_found += 1
+                        
+                        away_team_id = await find_team_id(db_session, match.away_team, league_id)
+                        if away_team_id:
+                            match.away_team_id = away_team_id
+                        else:
+                            away_team_not_found += 1
+                        
+                        if match.league_id and match.home_team_id and match.away_team_id:
+                            fully_matched += 1
+                            match_id = await find_match_id(
+                                db_session,
+                                match.league_id,
+                                match.home_team_id,
+                                match.away_team_id,
+                                match.start_time
+                            )
+                            if match_id:
+                                match.match_id = match_id
+                                match_id_found += 1
+                        
+                        ft_to_insert.append(match)
+                    
+                    if ft_to_insert:
+                        db_session.add_all(ft_to_insert)
+                        matches_ft_inserted = len(ft_to_insert)
+                        logger.info(f"Inserted {matches_ft_inserted} matches into sofascore_ft")
+                
+                await db_session.commit()
+                
+            except Exception as e:
+                await db_session.rollback()
+                logger.error(f"DB error: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+    
+    logger.info(f"Fetch complete for {date_str}: Live={matches_live_inserted}, FT={matches_ft_inserted}, Moved from Live={matches_moved_from_live}")
+    
+    return {
+        "status": "success",
+        "date": date_str,
+        "total_events_fetched": total_events_fetched,
+        "matches_live_inserted": matches_live_inserted,
+        "matches_ft_inserted": matches_ft_inserted,
+        "matches_notstarted_skipped": matches_notstarted_skipped,
+        "matches_moved_from_live_to_ft": matches_moved_from_live,
+        "stats": {
+            "duplicates_skipped": duplicate_count,
+            "fully_matched": fully_matched,
+            "match_ids_found": match_id_found,
+            "league_missing": league_not_found,
+            "teams_missing": home_team_not_found + away_team_not_found
+        }
+    }
+
 
 
 
 async def periodic_fetch_sofascore():
+    # while True:
+    #     # --- 1. SCHEDULING LOGIC ---
+    #     # Get current time in UTC
+    #     now = datetime.now(timezone.utc)
+        
+    #     # Calculate next midnight UTC
+    #     next_run = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    #     if next_run <= now:
+    #         next_run += timedelta(days=1)
+            
+    #     # Calculate seconds to wait
+    #     wait_seconds = (next_run - now).total_seconds()
+        
+    #     logger.info(f"Sleeping for {wait_seconds:.2f} seconds until {next_run} UTC")
+        
+    #     # Sleep until midnight
+    #     await asyncio.sleep(wait_seconds)
+        
+    #     # --- 2. EXECUTION LOGIC ---
+    #     try:
+    #         # Recalculate 'now' because we just woke up at midnight
+    #         execution_time = datetime.now(timezone.utc)
+            
+    #         # Calculate "yesterday" (1 day before execution time)
+    #         yesterday = execution_time - timedelta(days=1)
+            
+    #         # Format as YYYY-MM-DD string
+    #         date_str = yesterday.strftime('%Y-%m-%d')
+            
+    #         logger.info(f"Running fetch for date: {date_str}")
+            
+    #         await fetch_sofascore_today()
+            
+    #     except Exception as e:
+    #         logger.error(f"Error in periodic_fetch_sofascore: {e}")
+
     while True:
-        # --- 1. SCHEDULING LOGIC ---
-        # Get current time in UTC
-        now = datetime.now(timezone.utc)
-        
-        # Calculate next midnight UTC
-        next_run = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        if next_run <= now:
-            next_run += timedelta(days=1)
-            
-        # Calculate seconds to wait
-        wait_seconds = (next_run - now).total_seconds()
-        
-        logger.info(f"Sleeping for {wait_seconds:.2f} seconds until {next_run} UTC")
-        
-        # Sleep until midnight
-        await asyncio.sleep(wait_seconds)
-        
-        # --- 2. EXECUTION LOGIC ---
+        # logger.info(f"---- In periodic_fetch_sofascore()")
         try:
-            # Recalculate 'now' because we just woke up at midnight
-            execution_time = datetime.now(timezone.utc)
-            
-            # Calculate "yesterday" (1 day before execution time)
-            yesterday = execution_time - timedelta(days=1)
-            
-            # Format as YYYY-MM-DD string
-            date_str = yesterday.strftime('%Y-%m-%d')
-            
-            logger.info(f"Running fetch for date: {date_str}")
-            
-            await fetch_sofascore_range(start_date=date_str, end_date=date_str)
-            
+            await fetch_sofascore_today()
         except Exception as e:
             logger.error(f"Error in periodic_fetch_sofascore: {e}")
+        await asyncio.sleep(600)

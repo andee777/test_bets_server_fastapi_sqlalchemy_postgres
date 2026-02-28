@@ -233,3 +233,4 @@ class SofascoreLive(Base):
     league_id = Column(Integer, nullable=True)
     match_id = Column(Text, nullable=True)
     event_status = Column(Text, nullable=True)
+    match_time = Column(Text, nullable=True)

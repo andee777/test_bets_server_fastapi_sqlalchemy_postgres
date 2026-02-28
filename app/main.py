@@ -14,6 +14,7 @@ from app.tasks.fetch_live_odds import periodic_fetch_live
 from app.tasks.cleanup import periodic_cleanup
 from app.tasks.archive_ended_matches import periodic_archive_ended_matches
 from app.tasks.run_user_bots import periodic_run_all_bots
+from app.tasks.update_sofascore_ft import periodic_fetch_sofascore
 
 # Import the new router
 from app.routers import sofascore
@@ -38,6 +39,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(periodic_cleanup()),
         asyncio.create_task(periodic_archive_ended_matches()),
         asyncio.create_task(periodic_run_all_bots()),
+        asyncio.create_task(periodic_fetch_sofascore()),
     ]
     try:
         yield
